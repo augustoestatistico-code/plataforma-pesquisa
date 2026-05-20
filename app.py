@@ -7,9 +7,9 @@ import json
 from sqlalchemy import create_engine
 import os
 
-engine = create_engine(
-    "postgresql://postgres:123456@localhost:5432/plataforma_pesquisa"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
 
 app = dash.Dash(__name__)
 server = app.server
