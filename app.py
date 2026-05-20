@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 import json
 from sqlalchemy import create_engine
+import os
 
 engine = create_engine(
     "postgresql://postgres:123456@localhost:5432/plataforma_pesquisa"
@@ -22,7 +23,7 @@ def tratar_json(x):
 
 app.layout = html.Div([
 
-    html.H1("📊 Plataforma de Monitoramento Pesquisa de Opinião"),
+    html.H1("📊 DASHBOARD ONLINE"),
 
     dcc.Dropdown(id='pesquisa'),
 
@@ -67,4 +68,11 @@ def atualizar(n, pesquisa):
 
     return fig, opts
 
-app.run(debug=True)
+
+
+if __name__ == '__main__':
+    app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get("PORT", 8050)),
+        debug=False
+    )
