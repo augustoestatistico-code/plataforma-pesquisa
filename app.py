@@ -145,3 +145,11 @@ if __name__ == '__main__':
         port=int(os.environ.get("PORT", 8050)),
         debug=False
     )
+
+print("🔥 TESTE BANCO")
+
+df_test = pd.read_sql("SELECT COUNT(*) as total FROM entrevistas", engine)
+print(df_test)
+
+df_pesq = pd.read_sql("SELECT * FROM pesquisas", engine)
+print(df_pesq)
