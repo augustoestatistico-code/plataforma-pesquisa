@@ -22,15 +22,26 @@ def load_pesquisas():
 # LOAD DATA
 # =========================
 def load_data(pesquisa_id):
+
     query = f"""
         SELECT sexo, idade, localidade, entrevistador
         FROM entrevistas
         WHERE pesquisa_id = {pesquisa_id}
     """
-    df = pd.read_sql(query, engine)
-    df['idade'] = pd.to_numeric(df['idade'], errors='coerce')
-    return df
 
+    df = pd.read_sql(query, engine)
+
+    # ================= LIMPEZA =================
+    df['sexo'] = df['sexo'].astype(str).str.strip().str.capitalize()
+    df['localidade'] = df['localidade'].astype(str).str.strip()
+    df['entrevistador'] = df['entrevistador'].astype(str).str.strip()
+
+    df['idade'] = pd.to_numeric(df['idade'], errors='coerce')
+
+    # remover vazios
+    df = df.dropna(subset=['localidade'])
+
+    return df
 # =========================
 # FAIXA ETÁRIA
 # =========================
@@ -159,40 +170,52 @@ def update(pesquisa_id, sexo, local):
     ]
 
     # ================= GRÁFICO BAIRRO =================
-    bairro = df['localidade'].value_counts()
-    bairro_perc = df['localidade'].value_counts(normalize=True)
+bairro_df = (
+    df.groupby('localidade')
+    .size()
+    .reset_index(name='qtd')
+)
 
-    bairro_df = pd.DataFrame({
-        'bairro': bairro.index,
-        'qtd': bairro.values,
-        'perc': bairro_perc.values
-    }).sort_values('qtd', ascending=True)
+bairro_df['perc'] = bairro_df['qtd'] / bairro_df['qtd'].sum()
 
-    fig_bairro = px.bar(
-        bairro_df,
-        x='qtd',
-        y='bairro',
-        orientation='h',
-        text=bairro_df.apply(lambda x: f"{x['qtd']} ({x['perc']:.1%})", axis=1)
-    )
+bairro_df = bairro_df.sort_values('qtd', ascending=True)
+
+fig_bairro = px.bar(
+    bairro_df,
+    x='qtd',
+    y='localidade',
+    orientation='h',
+    text=bairro_df.apply(lambda x: f"{x['qtd']} ({x['perc']:.1%})", axis=1)
+)
+
+fig_bairro.update_layout(
+    title="Distribuição por Bairro",
+    yaxis_title="Bairro",
+    xaxis_title="Entrevistas"
+)
 
     # ================= ENTREVISTADOR =================
-    prod = df['entrevistador'].value_counts()
-    prod_perc = df['entrevistador'].value_counts(normalize=True)
+prod_df = (
+    df.groupby('entrevistador')
+    .size()
+    .reset_index(name='qtd')
+)
 
-    prod_df = pd.DataFrame({
-        'entrevistador': prod.index,
-        'qtd': prod.values,
-        'perc': prod_perc.values
-    }).sort_values('qtd', ascending=True)
+prod_df['perc'] = prod_df['qtd'] / prod_df['qtd'].sum()
 
-    fig_prod = px.bar(
-        prod_df,
-        x='qtd',
-        y='entrevistador',
-        orientation='h',
-        text=prod_df.apply(lambda x: f"{x['qtd']} ({x['perc']:.1%})", axis=1)
-    )
+prod_df = prod_df.sort_values('qtd', ascending=True)
+
+fig_prod = px.bar(
+    prod_df,
+    x='qtd',
+    y='entrevistador',
+    orientation='h',
+    text=prod_df.apply(lambda x: f"{x['qtd']} ({x['perc']:.1%})", axis=1)
+)
+
+fig_prod.update_layout(
+    title="Produção por Entrevistador"
+)
 
     # ================= FILTROS DINÂMICOS =================
     sexo_opts = [{"label": s, "value": s} for s in df['sexo'].dropna().unique()]
