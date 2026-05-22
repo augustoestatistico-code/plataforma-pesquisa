@@ -6,25 +6,29 @@ from dash import dcc, html, Input, Output
 import plotly.express as px
 
 # =========================
-# CONEXÃO BANCO
+# CONEXÃO
 # =========================
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 engine = create_engine(DATABASE_URL)
+
+# =========================
+# LOAD PESQUISAS
+# =========================
+def load_pesquisas():
+    query = "SELECT id, nome FROM pesquisas"
+    return pd.read_sql(query, engine)
 
 # =========================
 # LOAD DATA
 # =========================
-def load_data():
-    query = """
+def load_data(pesquisa_id):
+    query = f"""
         SELECT sexo, idade, localidade, entrevistador
         FROM entrevistas
+        WHERE pesquisa_id = {pesquisa_id}
     """
     df = pd.read_sql(query, engine)
-
-    # GARANTIR tipos corretos
     df['idade'] = pd.to_numeric(df['idade'], errors='coerce')
-
     return df
 
 # =========================
@@ -48,6 +52,11 @@ server = app.server
 app.layout = html.Div([
 
     html.H1("📊 Dashboard Profissional", style={"textAlign": "center"}),
+
+    # ================= FILTRO PESQUISA =================
+    dcc.Dropdown(id="filtro-pesquisa", placeholder="Selecionar Pesquisa"),
+
+    html.Hr(),
 
     # ================= KPI =================
     html.Div([
@@ -88,10 +97,11 @@ app.layout = html.Div([
 ])
 
 # =========================
-# CALLBACK
+# CALLBACK PRINCIPAL
 # =========================
 @app.callback(
     [
+        Output("filtro-pesquisa", "options"),
         Output("kpi-total", "children"),
         Output("kpi-masc", "children"),
         Output("kpi-fem", "children"),
@@ -102,13 +112,24 @@ app.layout = html.Div([
         Output("filtro-local", "options"),
     ],
     [
+        Input("filtro-pesquisa", "value"),
         Input("filtro-sexo", "value"),
         Input("filtro-local", "value"),
     ]
 )
-def update(sexo, local):
+def update(pesquisa_id, sexo, local):
 
-    df = load_data()
+    # ================= PESQUISAS =================
+    pesquisas = load_pesquisas()
+    pesquisa_opts = [
+        {"label": p["nome"], "value": p["id"]}
+        for _, p in pesquisas.iterrows()
+    ]
+
+    if not pesquisa_id:
+        return pesquisa_opts, 0, "", "", [], {}, {}, [], []
+
+    df = load_data(pesquisa_id)
 
     # ================= FILTROS =================
     if sexo:
@@ -155,7 +176,7 @@ def update(sexo, local):
         text=bairro_df.apply(lambda x: f"{x['qtd']} ({x['perc']:.1%})", axis=1)
     )
 
-    # ================= GRÁFICO ENTREVISTADOR =================
+    # ================= ENTREVISTADOR =================
     prod = df['entrevistador'].value_counts()
     prod_perc = df['entrevistador'].value_counts(normalize=True)
 
@@ -178,6 +199,7 @@ def update(sexo, local):
     local_opts = [{"label": l, "value": l} for l in df['localidade'].dropna().unique()]
 
     return (
+        pesquisa_opts,
         total,
         f"{masc} ({masc_perc:.1%})",
         f"{fem} ({fem_perc:.1%})",
