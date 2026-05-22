@@ -1,67 +1,55 @@
 import requests
 import pandas as pd
-import psycopg2
 import json
 from requests.auth import HTTPBasicAuth
 from sqlalchemy import create_engine
-from config import *
+import os
 
-engine = create_engine(
-    "postgresql://postgres:123456@localhost:5432/plataforma_pesquisa"
-)
+# ===== CONFIG =====
 
-conn = engine.raw_connection()
-cur = conn.cursor()
+ODK_URL="https://app.ar7pesquisas.com.br"
+ODK_USER="augusto.estatistico@gmail.com"
+ODK_PASS="@Mat050dois"
 
-pesquisas = pd.read_sql("SELECT * FROM pesquisas", engine)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-for _, p in pesquisas.iterrows():
+engine = create_engine(DATABASE_URL)
 
-    projeto = p['projeto_odk']
-    form_id = p['form_id']
-    cliente_id = p['cliente_id']
-    pesquisa_id = p['id']
+# ===== BUSCAR PESQUISA =====
+pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine).iloc[0]
 
-    url = f"{ODK_URL}/v1/projects/{projeto}/forms/{form_id}.svc/Submissions"
+url = f"{ODK_URL}/v1/projects/{pesquisa['projeto_odk']}/forms/{pesquisa['form_id']}.svc/Submissions"
 
-    r = requests.get(
-        url,
-        auth=HTTPBasicAuth(ODK_USER, ODK_PASS)
-    )
+r = requests.get(url, auth=HTTPBasicAuth(ODK_USER, ODK_PASS))
+data = r.json().get('value', [])
 
-    data = r.json().get('value', [])
+df = pd.DataFrame(data)
 
-    df = pd.DataFrame(data)
+print("TOTAL:", len(df))
 
-    if df.empty:
-        continue
+# ===== INSERIR =====
+for _, row in df.iterrows():
 
-    for _, row in df.iterrows():
+    dados = row.where(pd.notnull(row), None).to_dict()
 
-        dados = row.where(pd.notnull(row), None).to_dict()
+    sexo = dados.get("SEXO")
+    idade = dados.get("IDADE")
+    localidade = dados.get("LOCALIDADE")
 
-        cur.execute("""
+   with engine.begin() as conn:
+    conn.execute("""
         INSERT INTO entrevistas (
-            submission_id,
-            cliente_id,
-            pesquisa_id,
-            sexo,
-            idade,
-            localidade,
-            dados
+            submission_id, pesquisa_id, sexo, idade, localidade, dados
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s)
         ON CONFLICT (submission_id) DO NOTHING
-        """, (
-            row.get('__id'),
-            cliente_id,
-            pesquisa_id,
-            row.get('SEXO'),
-            row.get('IDADE'),
-            row.get('LOCALIDADE'),
-            json.dumps(dados, ensure_ascii=False)
-        ))
+    """, (
+        dados.get("__id"),
+        pesquisa['id'],
+        sexo,
+        idade,
+        localidade,
+        json.dumps(dados, ensure_ascii=False)
+    ))
 
-conn.commit()
-
-print("✅ ETL CONCLUÍDO")
+print("✅ ETL OK")

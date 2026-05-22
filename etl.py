@@ -1,67 +1,90 @@
 import requests
 import pandas as pd
-import psycopg2
 import json
 from requests.auth import HTTPBasicAuth
-from sqlalchemy import create_engine
-from config import *
+from sqlalchemy import create_engine, text
+import os
 
-engine = create_engine(
-    "postgresql://postgres:123456@localhost:5432/plataforma_pesquisa"
-)
+# ===== CONFIG =====
 
-conn = engine.raw_connection()
-cur = conn.cursor()
+ODK_URL="https://app.ar7pesquisas.com.br"
+ODK_USER="augusto.estatistico@gmail.com"
+ODK_PASS="@Mat050dois"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-pesquisas = pd.read_sql("SELECT * FROM pesquisas", engine)
+if not DATABASE_URL:
+    raise ValueError("❌ DATABASE_URL não definida")
 
-for _, p in pesquisas.iterrows():
+engine = create_engine(DATABASE_URL)
 
-    projeto = p['projeto_odk']
-    form_id = p['form_id']
-    cliente_id = p['cliente_id']
-    pesquisa_id = p['id']
+# ===== BUSCAR PESQUISA =====
+df_pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine)
 
-    url = f"{ODK_URL}/v1/projects/{projeto}/forms/{form_id}.svc/Submissions"
+if df_pesquisa.empty:
+    raise ValueError("❌ Tabela pesquisas vazia")
 
-    r = requests.get(
-        url,
-        auth=HTTPBasicAuth(ODK_USER, ODK_PASS)
-    )
+pesquisa = df_pesquisa.iloc[0]
 
-    data = r.json().get('value', [])
+print("USANDO PESQUISA:", pesquisa['nome'])
 
-    df = pd.DataFrame(data)
+# ===== BUSCAR DADOS ODK =====
+url = f"{ODK_URL}/v1/projects/{pesquisa['projeto_odk']}/forms/{pesquisa['form_id']}.svc/Submissions"
 
-    if df.empty:
-        continue
+r = requests.get(url, auth=HTTPBasicAuth(ODK_USER, ODK_PASS))
+
+if r.status_code != 200:
+    raise ValueError(f"Erro ODK: {r.status_code}")
+
+data = r.json().get('value', [])
+
+df = pd.DataFrame(data)
+
+print("TOTAL:", len(df))
+
+if df.empty:
+    print("⚠️ Nenhum dado retornado")
+    exit()
+
+# ===== INSERIR NO BANCO =====
+with engine.begin() as conn:
 
     for _, row in df.iterrows():
 
         dados = row.where(pd.notnull(row), None).to_dict()
 
-        cur.execute("""
-        INSERT INTO entrevistas (
-            submission_id,
-            cliente_id,
-            pesquisa_id,
-            sexo,
-            idade,
-            localidade,
-            dados
-        )
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (submission_id) DO NOTHING
-        """, (
-            row.get('__id'),
-            cliente_id,
-            pesquisa_id,
-            row.get('SEXO'),
-            row.get('IDADE'),
-            row.get('LOCALIDADE'),
-            json.dumps(dados, ensure_ascii=False)
-        ))
+        sexo = dados.get("SEXO")
+        idade = dados.get("IDADE")
+        localidade = dados.get("LOCALIDADE")
 
-conn.commit()
+        try:
+            conn.execute(text("""
+                INSERT INTO entrevistas (
+                    submission_id,
+                    pesquisa_id,
+                    sexo,
+                    idade,
+                    localidade,
+                    dados
+                )
+                VALUES (
+                    :submission_id,
+                    :pesquisa_id,
+                    :sexo,
+                    :idade,
+                    :localidade,
+                    :dados
+                )
+                ON CONFLICT (submission_id) DO NOTHING
+            """), {
+                "submission_id": dados.get("__id"),
+                "pesquisa_id": int(pesquisa['id']),
+                "sexo": sexo,
+                "idade": idade,
+                "localidade": localidade,
+                "dados": json.dumps(dados, ensure_ascii=False)
+            })
 
-print("✅ ETL CONCLUÍDO")
+        except Exception as e:
+            print("ERRO AO INSERIR:", e)
+
+print("✅ ETL FINALIZADO COM SUCESSO")
