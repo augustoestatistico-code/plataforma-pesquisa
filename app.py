@@ -54,14 +54,16 @@ def login():
         email = request.form.get("email")
         senha = request.form.get("senha")
 
-        user = engine.execute(text("""
-            SELECT * FROM usuarios 
-            WHERE email = :email AND senha = :senha
-        """), {"email": email, "senha": senha}).fetchone()
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT email, senha, pesquisa_id 
+                FROM usuarios 
+                WHERE email = :email AND senha = :senha
+            """), {"email": email, "senha": senha}).fetchone()
 
-        if user:
+        if result:
             session["usuario"] = email
-            session["pesquisa_id"] = user.pesquisa_id
+            session["pesquisa_id"] = result[2]
             return redirect("/")
 
         return "Login inválido"
