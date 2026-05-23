@@ -140,18 +140,13 @@ def atualizar(pergunta):
     if df.empty:
         return "Sem dados", {}, "", {}, [], None
 
-    total = len(df)
-
-    # =========================
     # KPI
-    # =========================
+    total = len(df)
     kpis = html.Div([
         html.H3(f"Total Entrevistas: {total}")
     ])
 
-    # =========================
     # BAIRRO
-    # =========================
     bairro = df["localidade"].value_counts().reset_index()
     bairro.columns = ["bairro", "qtd"]
 
@@ -163,9 +158,7 @@ def atualizar(pergunta):
         title="Entrevistas por Bairro"
     )
 
-    # =========================
     # ENTREVISTADOR
-    # =========================
     ent = df["entrevistador"].value_counts().reset_index()
     ent.columns = ["Entrevistador", "Quantidade"]
 
@@ -182,17 +175,13 @@ def atualizar(pergunta):
         ])
     ])
 
-    # =========================
-    # LISTA DE PERGUNTAS
-    # =========================
+    # COLUNAS DINÂMICAS
     ignorar = ["id", "submission_id", "pesquisa_id", "dados"]
     colunas = [c for c in df.columns if c not in ignorar]
 
     opcoes = [{"label": c, "value": c} for c in colunas]
 
-    # =========================
     # GRÁFICO DINÂMICO
-    # =========================
     if not pergunta:
         pergunta = "SEXO" if "SEXO" in df.columns else colunas[0]
 
@@ -206,6 +195,11 @@ def atualizar(pergunta):
         orientation="h",
         title=f"Distribuição - {pergunta}"
     )
+
+    # LOGO DESATIVADO (pra não quebrar)
+    logo = None
+
+    return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
 
     # =========================
     # LOGO
