@@ -2,21 +2,23 @@ import os
 import pandas as pd
 from sqlalchemy import create_engine, text
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, State
 import plotly.express as px
 from flask import Flask, request, session, redirect
 import urllib.parse
 
 # =========================
-# CONFIG
+# FLASK SERVER
 # =========================
 server = Flask(__name__)
 server.secret_key = "supersecretkey"
 
-# conexão (Render usa DATABASE_URL)
+# =========================
+# DATABASE
+# =========================
 DATABASE_URL = urllib.parse.unquote(os.getenv("DATABASE_URL"))
 engine = create_engine(DATABASE_URL)
-print("DATABASE:", engine.connect().execute(text("SELECT 1")).fetchone())
+
 
 # =========================
 # LOGIN
@@ -27,12 +29,13 @@ def login():
         email = request.form.get("email")
         senha = request.form.get("senha")
 
-        query = """
-            SELECT * FROM usuarios
+        query = text("""
+            SELECT id, email, cliente_id
+            FROM usuarios
             WHERE email = :email AND senha = :senha
-        """
+        """)
 
-        user = pd.read_sql(text(query), engine, params={
+        user = pd.read_sql(query, engine, params={
             "email": email,
             "senha": senha
         })
@@ -53,6 +56,7 @@ def login():
         </form>
     """
 
+
 # =========================
 # PROTEÇÃO
 # =========================
@@ -65,16 +69,17 @@ def proteger():
     if "user" not in session:
         return redirect("/login")
 
+
 # =========================
-# FUNÇÕES DADOS
+# FUNÇÕES
 # =========================
 def get_pesquisas(cliente_id):
-    query = """
+    query = text("""
         SELECT id, nome
         FROM pesquisas
         WHERE cliente_id = :cliente_id
-    """
-    return pd.read_sql(text(query), engine, params={"cliente_id": cliente_id})
+    """)
+    return pd.read_sql(query, engine, params={"cliente_id": cliente_id})
 
 
 def carregar_dados(cliente_id, pesquisa_id=None):
@@ -87,7 +92,7 @@ def carregar_dados(cliente_id, pesquisa_id=None):
             e.localidade,
             e.entrevistador
         FROM entrevistas e
-        JOIN pesquisas p ON e.pesquisa_id = p.id
+        JOIN pesquisas p ON p.id = e.pesquisa_id
         WHERE p.cliente_id = :cliente_id
     """
 
@@ -99,41 +104,59 @@ def carregar_dados(cliente_id, pesquisa_id=None):
 
     df = pd.read_sql(text(query), engine, params=params)
 
+    print("COLUNAS:", df.columns)
     print("TOTAL:", len(df))
 
     if df.empty:
-        print("⚠️ SEM DADOS")
+        return df
 
-    if not df.empty:
-        df["sexo"] = df["sexo"].astype(str).str.strip().str.title()
-        df["localidade"] = df["localidade"].astype(str).str.strip().str.upper()
-        df["entrevistador"] = df["entrevistador"].astype(str).str.replace("ENTREVISTADOR", "", regex=False).str.strip()
-        df["idade"] = df["idade"].astype(str).str.strip()
+    df["sexo"] = df["sexo"].astype(str).str.strip().str.title()
+    df["localidade"] = df["localidade"].astype(str).str.strip().str.upper()
+    df["entrevistador"] = df["entrevistador"].astype(str).str.replace("ENTREVISTADOR", "", regex=False).str.strip()
+    df["idade"] = df["idade"].astype(str).str.strip()
 
     return df
+
 
 # =========================
 # DASH APP
 # =========================
 app = dash.Dash(__name__, server=server, url_base_pathname="/")
 
+
 app.layout = html.Div([
     html.H2("Dashboard de Pesquisa"),
 
-    dcc.Dropdown(id="filtro-pesquisa", placeholder="Selecione a pesquisa"),
+    dcc.Store(id="store-cliente"),
+
+    dcc.Dropdown(id="filtro-pesquisa"),
 
     dcc.Graph(id="grafico-sexo"),
 ])
 
+
 # =========================
-# DROPDOWN
+# PEGAR CLIENTE DO FLASK
+# =========================
+@app.callback(
+    Output("store-cliente", "data"),
+    Input("filtro-pesquisa", "id")
+)
+def get_cliente(_):
+    return session.get("cliente_id")
+
+
+# =========================
+# POPULAR DROPDOWN
 # =========================
 @app.callback(
     Output("filtro-pesquisa", "options"),
-    Input("filtro-pesquisa", "id")
+    Input("store-cliente", "data")
 )
-def carregar_opcoes(_):
-    cliente_id = session.get("cliente_id")
+def carregar_opcoes(cliente_id):
+
+    if not cliente_id:
+        return []
 
     df = get_pesquisas(cliente_id)
 
@@ -142,16 +165,19 @@ def carregar_opcoes(_):
         for _, row in df.iterrows()
     ]
 
+
 # =========================
 # GRAFICO
 # =========================
 @app.callback(
     Output("grafico-sexo", "figure"),
-    Input("filtro-pesquisa", "value")
+    Input("filtro-pesquisa", "value"),
+    State("store-cliente", "data")
 )
-def atualizar(pesquisa_id):
+def atualizar(pesquisa_id, cliente_id):
 
-    cliente_id = session.get("cliente_id")
+    if not cliente_id:
+        return px.bar(title="Sem cliente logado")
 
     df = carregar_dados(cliente_id, pesquisa_id)
 
@@ -161,6 +187,7 @@ def atualizar(pesquisa_id):
     fig = px.histogram(df, x="sexo", title="Distribuição por Sexo")
 
     return fig
+
 
 # =========================
 # RUN
