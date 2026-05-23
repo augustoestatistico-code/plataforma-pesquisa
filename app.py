@@ -1,183 +1,179 @@
+import os
 import pandas as pd
-import psycopg2
-import json
-
-from flask import Flask, request, redirect, session
+from sqlalchemy import create_engine, text
 import dash
-from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+from dash import dcc, html, Input, Output
 import plotly.express as px
+from flask import Flask, request, redirect, session
 
 # =========================
-# CONFIG
+# CONFIG SERVIDOR
 # =========================
+server = Flask(__name__)
+server.secret_key = "secret123"
 
-app = Flask(__name__)
-app.secret_key = "segredo123"
-
-# conexão supabase (ALTERE)
-conn = psycopg2.connect(
-    host="SEU_HOST",
-    database="SEU_DB",
-    user="SEU_USER",
-    password="SEU_PASSWORD"
-)
+# =========================
+# CONEXÃO DATABASE (Render já tem DATABASE_URL)
+# =========================
+DATABASE_URL = os.getenv("DATABASE_URL")
+engine = create_engine(DATABASE_URL)
 
 # =========================
 # LOGIN
 # =========================
-
-@app.route("/login", methods=["GET", "POST"])
+@server.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"]
-        senha = request.form["senha"]
+        email = request.form.get("email")
+        senha = request.form.get("senha")
 
-        df = pd.read_sql(f"""
-        SELECT * FROM usuarios
-        WHERE email = '{email}' AND senha = '{senha}'
-        """, conn)
+        query = f"""
+            SELECT id, cliente_id 
+            FROM usuarios 
+            WHERE email = '{email}' 
+            AND senha = '{senha}'
+        """
+
+        df = pd.read_sql(text(query), engine)
 
         if not df.empty:
+            session["usuario_id"] = int(df.iloc[0]["id"])
             session["cliente_id"] = int(df.iloc[0]["cliente_id"])
-            session["logo"] = df.iloc[0]["logo"]
-
-            # pega pesquisa do cliente
-            pesquisa = pd.read_sql(f"""
-            SELECT * FROM pesquisas
-            WHERE cliente_id = {session["cliente_id"]}
-            LIMIT 1
-            """, conn)
-
-            if not pesquisa.empty:
-                session["pesquisa_id"] = int(pesquisa.iloc[0]["id"])
-
             return redirect("/")
-
-        return "Login inválido"
+        else:
+            return "Login inválido"
 
     return """
-    <form method="post">
-        Email: <input name="email"><br>
-        Senha: <input name="senha" type="password"><br>
-        <button type="submit">Entrar</button>
-    </form>
+        <form method="post">
+            <input name="email" placeholder="email"><br>
+            <input name="senha" type="password" placeholder="senha"><br>
+            <button type="submit">Entrar</button>
+        </form>
     """
 
 # =========================
-# DASH
+# CARREGAR DADOS
 # =========================
+def carregar_dados(cliente_id):
+    query = f"""
+        SELECT 
+            e.pesquisa_id,
+            e.sexo,
+            e.idade,
+            e.localidade,
+            e.entrevistador
+        FROM entrevistas e
+        JOIN pesquisas p ON e.pesquisa_id = p.id
+        WHERE p.cliente_id = {cliente_id}
+    """
 
-dash_app = dash.Dash(
-    __name__,
-    server=app,
-    url_base_pathname="/"
-)
+    df = pd.read_sql(text(query), engine)
 
-dash_app.layout = html.Div([
-    html.H2("Dashboard Pesquisa"),
+    if df.empty:
+        return df
 
-    dcc.Interval(id="interval", interval=2000, n_intervals=0),
+    # LIMPEZA
+    df["sexo"] = df["sexo"].astype(str).str.strip().str.title()
+    df["idade"] = df["idade"].astype(str).str.strip()
+    df["localidade"] = df["localidade"].astype(str).str.upper()
+
+    return df
+
+# =========================
+# DASH APP
+# =========================
+app = dash.Dash(__name__, server=server, suppress_callback_exceptions=True)
+
+app.layout = html.Div([
+
+    html.H2("Dashboard de Pesquisa"),
+
+    dcc.Interval(id="interval", interval=5000),
 
     html.Div(id="kpis"),
-    dcc.Dropdown(id="pergunta"),
-    dcc.Graph(id="grafico"),
 
-    dash_table.DataTable(id="tabela")
+    html.Br(),
+
+    dcc.Graph(id="grafico_sexo"),
+    dcc.Graph(id="grafico_idade"),
+
 ])
 
 # =========================
 # CALLBACK
 # =========================
-
-@dash_app.callback(
-    [
-        Output("kpis", "children"),
-        Output("pergunta", "options"),
-        Output("grafico", "figure"),
-        Output("tabela", "data")
-    ],
-    [Input("interval", "n_intervals")]
+@app.callback(
+    Output("kpis", "children"),
+    Output("grafico_sexo", "figure"),
+    Output("grafico_idade", "figure"),
+    Input("interval", "n_intervals")
 )
 def atualizar(n):
 
-    if "pesquisa_id" not in session:
-        return "Faça login em /login", [], {}, []
+    if "cliente_id" not in session:
+        return "Faça login em /login", {}, {}
 
-    # =========================
-    # LER DADOS
-    # =========================
-    df = pd.read_sql(f"""
-    SELECT * FROM entrevistas
-    WHERE pesquisa_id = {session['pesquisa_id']}
-    """, conn)
+    df = carregar_dados(session["cliente_id"])
 
     if df.empty:
-        return "Sem dados (rode /etl)", [], {}, []
+        return "Sem dados", {}, {}
 
     # =========================
-    # JSON ODK
+    # KPI TOTAL
     # =========================
-    df_json = pd.json_normalize(df["dados"].apply(json.loads))
+    total = len(df)
 
     # =========================
-    # KPIs
+    # SEXO
     # =========================
-    total = len(df_json)
+    sexo = df["sexo"].value_counts().reset_index()
+    sexo.columns = ["sexo", "qtd"]
+    sexo["perc"] = (sexo["qtd"] / total * 100).round(1)
 
-    kpis = html.Div([
-        html.H3(f"Amostra: {total}")
+    fig_sexo = px.bar(
+        sexo,
+        x="sexo",
+        y="qtd",
+        text=sexo["perc"].astype(str) + "%"
+    )
+
+    # =========================
+    # IDADE
+    # =========================
+    idade = df["idade"].value_counts().reset_index()
+    idade.columns = ["idade", "qtd"]
+    idade["perc"] = (idade["qtd"] / total * 100).round(1)
+
+    fig_idade = px.bar(
+        idade,
+        x="idade",
+        y="qtd",
+        text=idade["perc"].astype(str) + "%"
+    )
+
+    # =========================
+    # KPI TABELA
+    # =========================
+    tabela = html.Div([
+        html.H4(f"Amostra Total: {total}"),
+
+        html.H5("Sexo"),
+        html.Table([
+            html.Tr([html.Th("Sexo"), html.Th("Qtd"), html.Th("%")])] +
+            [html.Tr([html.Td(r["sexo"]), html.Td(r["qtd"]), html.Td(f"{r['perc']}%")]) for _, r in sexo.iterrows()]
+        ),
+
+        html.H5("Idade"),
+        html.Table([
+            html.Tr([html.Th("Idade"), html.Th("Qtd"), html.Th("%")])] +
+            [html.Tr([html.Td(r["idade"]), html.Td(r["qtd"]), html.Td(f"{r['perc']}%")]) for _, r in idade.iterrows()]
+        )
     ])
 
-    # =========================
-    # LISTA DE PERGUNTAS DINÂMICAS
-    # =========================
-    perguntas = df_json.columns.tolist()
-
-    opcoes = [{"label": p, "value": p} for p in perguntas]
-
-    if not perguntas:
-        return kpis, [], {}, []
-
-    pergunta = perguntas[0]
-
-    # =========================
-    # GRÁFICO
-    # =========================
-    contagem = df_json[pergunta].value_counts(normalize=True) * 100
-    contagem = contagem.reset_index()
-    contagem.columns = ["resposta", "percentual"]
-
-    fig = px.bar(
-        contagem,
-        x="resposta",
-        y="percentual",
-        text=contagem["percentual"].round(1)
-    )
-
-    fig.update_traces(
-        texttemplate="%{text}%",
-        textposition="outside"
-    )
-
-    # =========================
-    # TABELA
-    # =========================
-    tabela = df_json.head(50).to_dict("records")
-
-    return kpis, opcoes, fig, tabela
-
-
-# =========================
-# ETL (SIMPLES MOCK)
-# =========================
-
-@app.route("/etl")
-def etl():
-    return "ETL OK (implementar integração ODK aqui)"
+    return tabela, fig_sexo, fig_idade
 
 # =========================
 # RUN
 # =========================
-
-server = app
+if __name__ == "__main__":
+    app.run(debug=True)
