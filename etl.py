@@ -10,42 +10,34 @@ import os
 ODK_URL="https://app.ar7pesquisas.com.br"
 ODK_USER="augusto.estatistico@gmail.com"
 ODK_PASS="@Mat050dois"
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
-    raise ValueError("❌ DATABASE_URL não definida")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 
 # ===== BUSCAR PESQUISA =====
-df_pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine)
+pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine).iloc[0]
 
-if df_pesquisa.empty:
-    raise ValueError("❌ Tabela pesquisas vazia")
-
-pesquisa = df_pesquisa.iloc[0]
-
-print("USANDO PESQUISA:", pesquisa['nome'])
-
-# ===== BUSCAR DADOS ODK =====
 url = f"{ODK_URL}/v1/projects/{pesquisa['projeto_odk']}/forms/{pesquisa['form_id']}.svc/Submissions"
 
 r = requests.get(url, auth=HTTPBasicAuth(ODK_USER, ODK_PASS))
-
-if r.status_code != 200:
-    raise ValueError(f"Erro ODK: {r.status_code}")
-
 data = r.json().get('value', [])
 
 df = pd.DataFrame(data)
+print(df.columns)
 
 print("TOTAL:", len(df))
 
-if df.empty:
-    print("⚠️ Nenhum dado retornado")
-    exit()
+# ===== INSERIR =====
+for _, row in df.iterrows():
 
-# ===== INSERIR NO BANCO =====
+    dados = row.where(pd.notnull(row), None).to_dict()
+
+    sexo = dados.get("SEXO")
+    idade = dados.get("IDADE")
+    localidade = dados.get("LOCALIDADE")
+    entrevistador = dados.get("ENTREVISTADOR")
+
 with engine.begin() as conn:
 
     for _, row in df.iterrows():
@@ -56,6 +48,8 @@ with engine.begin() as conn:
         idade = dados.get("IDADE")
         localidade = dados.get("LOCALIDADE")
 
+        entrevistador = dados.get("ENTREVISTADOR")  # vamos ajustar depois se precisar
+
         try:
             conn.execute(text("""
                 INSERT INTO entrevistas (
@@ -64,6 +58,7 @@ with engine.begin() as conn:
                     sexo,
                     idade,
                     localidade,
+                    entrevistador,
                     dados
                 )
                 VALUES (
@@ -72,6 +67,7 @@ with engine.begin() as conn:
                     :sexo,
                     :idade,
                     :localidade,
+                    :entrevistador,
                     :dados
                 )
                 ON CONFLICT (submission_id) DO NOTHING
@@ -81,10 +77,14 @@ with engine.begin() as conn:
                 "sexo": sexo,
                 "idade": idade,
                 "localidade": localidade,
+                "entrevistador": entrevistador,
                 "dados": json.dumps(dados, ensure_ascii=False)
             })
 
         except Exception as e:
             print("ERRO AO INSERIR:", e)
 
-print("✅ ETL FINALIZADO COM SUCESSO")
+
+print("✅ ETL OK")
+print(df.columns)
+exit()

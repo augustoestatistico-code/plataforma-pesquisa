@@ -52,4 +52,8 @@ for _, row in df.iterrows():
         json.dumps(dados, ensure_ascii=False)
     ))
 
+
+
 print("✅ ETL OK")
+print(df.columns)
+exit()

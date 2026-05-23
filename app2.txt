@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, text
 import dash
 from dash import dcc, html, Input, Output
 import plotly.express as px
-from flask import request, session, redirect
+from flask import request
 
 # =========================
 # CONEXÃO
@@ -44,43 +44,6 @@ def carregar_dados(pesquisa_id=None):
 # =========================
 app = dash.Dash(__name__)
 server = app.server
-
-server.secret_key = "chave_super_secreta_123"
-
-@app.server.route("/login", methods=["GET", "POST"])
-def login():
-
-    if request.method == "POST":
-        email = request.form.get("email")
-        senha = request.form.get("senha")
-
-        user = engine.execute(text("""
-            SELECT * FROM usuarios 
-            WHERE email = :email AND senha = :senha
-        """), {"email": email, "senha": senha}).fetchone()
-
-        if user:
-            session["usuario"] = email
-            session["pesquisa_id"] = user.pesquisa_id
-            return redirect("/")
-
-        return "Login inválido"
-
-    return """
-    <h2>Login</h2>
-    <form method="post">
-        Email: <input name="email"><br>
-        Senha: <input name="senha" type="password"><br>
-        <button type="submit">Entrar</button>
-    </form>
-    """
-@app.server.before_request
-def proteger():
-    if request.path == "/login":
-        return
-
-    if "usuario" not in session:
-        return redirect("/login")
 
 # =========================
 # LISTA DE PESQUISAS
