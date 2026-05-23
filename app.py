@@ -49,33 +49,41 @@ server.secret_key = "chave_super_secreta_123"
 
 @app.server.route("/login", methods=["GET", "POST"])
 def login():
+    try:
+        if request.method == "POST":
+            email = request.form.get("email")
+            senha = request.form.get("senha")
 
-    if request.method == "POST":
-        email = request.form.get("email")
-        senha = request.form.get("senha")
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT * FROM usuarios 
+                    WHERE email = :email AND senha = :senha
+                """), {"email": email, "senha": senha}).fetchone()
 
-        with engine.connect() as conn:
-            result = conn.execute(text("""
-                SELECT email, senha, pesquisa_id 
-                FROM usuarios 
-                WHERE email = :email AND senha = :senha
-            """), {"email": email, "senha": senha}).fetchone()
+            if result:
+                session["usuario"] = email
 
-        if result:
-            session["usuario"] = email
-            session["pesquisa_id"] = result[2]
-            return redirect("/")
+                # 👇 tenta pegar pesquisa_id com segurança
+                try:
+                    session["pesquisa_id"] = result._mapping["pesquisa_id"]
+                except:
+                    session["pesquisa_id"] = 1  # fallback
 
-        return "Login inválido"
+                return redirect("/")
 
-    return """
-    <h2>Login</h2>
-    <form method="post">
-        Email: <input name="email"><br>
-        Senha: <input name="senha" type="password"><br>
-        <button type="submit">Entrar</button>
-    </form>
-    """
+            return "Login inválido"
+
+        return """
+        <h2>Login</h2>
+        <form method="post">
+            Email: <input name="email"><br>
+            Senha: <input name="senha" type="password"><br>
+            <button type="submit">Entrar</button>
+        </form>
+        """
+
+    except Exception as e:
+        return f"ERRO REAL: {str(e)}"
 @app.server.before_request
 def proteger():
     if request.path == "/login":
