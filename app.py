@@ -13,40 +13,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 
 # =========================
-# CARREGAR DADOS
-# =========================
-def carregar_dados(pesquisa_id=None):
-    query = """
-        SELECT 
-            pesquisa_id,
-            sexo,
-            idade,
-            localidade,
-            entrevistador
-        FROM entrevistas
-    """
-
-    if pesquisa_id:
-        query += f" WHERE pesquisa_id = {pesquisa_id}"
-
-    df = pd.read_sql(text(query), engine)
-
-    # LIMPEZA
-    df["sexo"] = df["sexo"].astype(str).str.strip().str.title()
-    df["localidade"] = df["localidade"].astype(str).str.strip().str.upper()
-    df["entrevistador"] = df["entrevistador"].astype(str).str.replace("ENTREVISTADOR", "", regex=False).str.strip()
-    df["idade"] = df["idade"].astype(str).str.strip()
-
-    return df
-
-# =========================
 # APP
 # =========================
 app = dash.Dash(__name__)
 server = app.server
-
 server.secret_key = "chave_super_secreta_123"
 
+# =========================
+# LOGIN
+# =========================
 @app.server.route("/login", methods=["GET", "POST"])
 def login():
     try:
@@ -62,12 +37,10 @@ def login():
 
             if result:
                 session["usuario"] = email
-
-                # 👇 tenta pegar pesquisa_id com segurança
                 try:
                     session["pesquisa_id"] = result._mapping["pesquisa_id"]
                 except:
-                    session["pesquisa_id"] = 1  # fallback
+                    session["pesquisa_id"] = 1
 
                 return redirect("/")
 
@@ -83,7 +56,11 @@ def login():
         """
 
     except Exception as e:
-        return f"ERRO REAL: {str(e)}"
+        return f"Erro: {str(e)}"
+
+# =========================
+# PROTEÇÃO
+# =========================
 @app.server.before_request
 def proteger():
     if request.path == "/login":
@@ -93,35 +70,52 @@ def proteger():
         return redirect("/login")
 
 # =========================
-# LISTA DE PESQUISAS
+# CARREGAR DADOS
 # =========================
-def lista_pesquisas():
-    df = pd.read_sql("SELECT DISTINCT pesquisa_id FROM entrevistas ORDER BY pesquisa_id", engine)
-    return [{"label": f"Pesquisa {i}", "value": i} for i in df["pesquisa_id"]]
+def carregar_dados():
+    pesquisa_id = session.get("pesquisa_id")
+
+    query = f"""
+        SELECT *
+        FROM entrevistas
+        WHERE pesquisa_id = {pesquisa_id}
+    """
+
+    df = pd.read_sql(text(query), engine)
+
+    # limpeza básica
+    df = df.fillna("Não informado")
+
+    return df
 
 # =========================
 # LAYOUT
 # =========================
 app.layout = html.Div([
 
-    html.H1("📊 DASHBOARD ELEITORAL PROFISSIONAL"),
+    html.Img(id="logo-cliente", style={"height": "80px"}),
+
+    html.H1("📊 DASHBOARD ELEITORAL"),
 
     dcc.Dropdown(
-        id="filtro-pesquisa",
-        options=lista_pesquisas(),
-        placeholder="Selecione a pesquisa"
+        id="filtro-pergunta",
+        placeholder="Escolha a pergunta",
+        style={"width": "50%"}
     ),
 
     html.Br(),
 
     html.Div(id="kpis"),
 
-    html.Br(),
-
     dcc.Graph(id="grafico-bairro"),
 
-    html.H3("Produção por Entrevistador"),
+    html.H3("Entrevistadores"),
     html.Div(id="tabela-entrevistador"),
+
+    html.H3("Análise por Pergunta"),
+    dcc.Graph(id="grafico-dinamico"),
+
+    html.Button("Exportar PDF", id="btn-pdf")
 ])
 
 # =========================
@@ -132,66 +126,26 @@ app.layout = html.Div([
         Output("kpis", "children"),
         Output("grafico-bairro", "figure"),
         Output("tabela-entrevistador", "children"),
+        Output("grafico-dinamico", "figure"),
+        Output("filtro-pergunta", "options"),
+        Output("logo-cliente", "src"),
     ],
-    Input("filtro-pesquisa", "value")
+    Input("filtro-pergunta", "value")
 )
-def atualizar(pesquisa_id):
+def atualizar(pergunta):
 
-    df = carregar_dados(pesquisa_id)
+    df = carregar_dados()
 
     if df.empty:
-        return "Sem dados", {}, ""
+        return "Sem dados", {}, "", {}, [], None
 
     total = len(df)
-
-    # =========================
-    # SEXO
-    # =========================
-    sexo = df["sexo"].value_counts()
-
-    masc = sexo.get("Masculino", 0)
-    fem = sexo.get("Feminino", 0)
-
-    masc_pct = round((masc / total) * 100, 1) if total else 0
-    fem_pct = round((fem / total) * 100, 1) if total else 0
-
-    # =========================
-    # FAIXA ETÁRIA
-    # =========================
-    ordem = [
-        "16 a 24 anos",
-        "25 a 34 anos",
-        "35 a 44 anos",
-        "45 a 59 anos",
-        "60 anos ou mais"
-    ]
-
-    faixa = df["idade"].value_counts()
-    faixa = faixa.reindex(ordem, fill_value=0)
-
-    faixa_html = []
-    for f in faixa.index:
-        n = faixa[f]
-        pct = round((n / total) * 100, 1)
-        faixa_html.append(html.Div(f"{f}: {n} ({pct}%)"))
 
     # =========================
     # KPI
     # =========================
     kpis = html.Div([
-        html.H3(f"Total Entrevistas: {total}"),
-
-        html.Div([
-            html.Div(f"Masculino: {masc} ({masc_pct}%)"),
-            html.Div(f"Feminino: {fem} ({fem_pct}%)"),
-        ]),
-
-        html.Br(),
-
-        html.Div([
-            html.H4("Faixa Etária"),
-            *faixa_html
-        ])
+        html.H3(f"Total Entrevistas: {total}")
     ])
 
     # =========================
@@ -200,53 +154,86 @@ def atualizar(pesquisa_id):
     bairro = df["localidade"].value_counts().reset_index()
     bairro.columns = ["bairro", "qtd"]
 
-    bairro["pct"] = (bairro["qtd"] / total * 100).round(1)
-
     fig_bairro = px.bar(
         bairro,
         x="qtd",
         y="bairro",
         orientation="h",
-        text=bairro["qtd"].astype(str) + " (" + bairro["pct"].astype(str) + "%)"
-    )
-
-    fig_bairro.update_layout(
-        title="Entrevistas por Bairro",
-        yaxis={'categoryorder': 'total ascending'}
+        title="Entrevistas por Bairro"
     )
 
     # =========================
-    # ENTREVISTADOR (TABELA)
+    # ENTREVISTADOR
     # =========================
     ent = df["entrevistador"].value_counts().reset_index()
     ent.columns = ["Entrevistador", "Quantidade"]
 
     tabela = html.Table([
-
-        html.Thead(
-            html.Tr([
-                html.Th("Entrevistador"),
-                html.Th("Quantidade")
-            ])
-        ),
-
+        html.Thead(html.Tr([
+            html.Th("Entrevistador"),
+            html.Th("Quantidade")
+        ])),
         html.Tbody([
             html.Tr([
                 html.Td(row["Entrevistador"]),
                 html.Td(row["Quantidade"])
             ]) for _, row in ent.iterrows()
         ])
+    ])
 
-    ], style={
-        "width": "50%",
-        "border": "1px solid #ccc",
-        "padding": "10px"
-    })
+    # =========================
+    # LISTA DE PERGUNTAS
+    # =========================
+    ignorar = ["id", "submission_id", "pesquisa_id", "dados"]
+    colunas = [c for c in df.columns if c not in ignorar]
 
-    return kpis, fig_bairro, tabela
+    opcoes = [{"label": c, "value": c} for c in colunas]
+
+    # =========================
+    # GRÁFICO DINÂMICO
+    # =========================
+    if not pergunta:
+        pergunta = "SEXO" if "SEXO" in df.columns else colunas[0]
+
+    graf = df[pergunta].value_counts().reset_index()
+    graf.columns = ["categoria", "qtd"]
+
+    fig_dinamico = px.bar(
+        graf,
+        x="qtd",
+        y="categoria",
+        orientation="h",
+        title=f"Distribuição - {pergunta}"
+    )
+
+    # =========================
+    # LOGO
+    # =========================
+    logo = None
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT logo FROM usuarios WHERE email = :email
+        """), {"email": session.get("usuario")}).fetchone()
+
+        if result:
+            logo = result[0]
+
+    return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
 
 # =========================
-# ETL ENDPOINT
+# PDF (simples)
+# =========================
+@app.callback(
+    Output("btn-pdf", "children"),
+    Input("btn-pdf", "n_clicks")
+)
+def exportar(n):
+    if n:
+        return "PDF gerado (implementar avançado depois)"
+    return "Exportar PDF"
+
+# =========================
+# ETL
 # =========================
 @app.server.route("/etl")
 def rodar_etl():
@@ -256,11 +243,11 @@ def rodar_etl():
         return "Acesso negado", 403
 
     os.system("python etl.py")
-    return "ETL executado com sucesso"
+    return "ETL executado"
 
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port)
