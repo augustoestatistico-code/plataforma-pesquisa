@@ -4,10 +4,7 @@ from sqlalchemy import create_engine, text
 import dash
 from dash import dcc, html, Input, Output
 import plotly.express as px
-
 from flask import request
-
-
 
 # =========================
 # CONEXÃO
@@ -34,9 +31,7 @@ def carregar_dados(pesquisa_id=None):
 
     df = pd.read_sql(text(query), engine)
 
-    # =========================
-    # LIMPEZA (ESSENCIAL)
-    # =========================
+    # LIMPEZA
     df["sexo"] = df["sexo"].astype(str).str.strip().str.title()
     df["localidade"] = df["localidade"].astype(str).str.strip().str.upper()
     df["entrevistador"] = df["entrevistador"].astype(str).str.replace("ENTREVISTADOR", "", regex=False).str.strip()
@@ -78,7 +73,8 @@ app.layout = html.Div([
 
     dcc.Graph(id="grafico-bairro"),
 
-    dcc.Graph(id="grafico-entrevistador"),
+    html.H3("Produção por Entrevistador"),
+    html.Div(id="tabela-entrevistador"),
 ])
 
 # =========================
@@ -88,7 +84,7 @@ app.layout = html.Div([
     [
         Output("kpis", "children"),
         Output("grafico-bairro", "figure"),
-        Output("grafico-entrevistador", "figure"),
+        Output("tabela-entrevistador", "children"),
     ],
     Input("filtro-pesquisa", "value")
 )
@@ -97,7 +93,7 @@ def atualizar(pesquisa_id):
     df = carregar_dados(pesquisa_id)
 
     if df.empty:
-        return "Sem dados", {}, {}
+        return "Sem dados", {}, ""
 
     total = len(df)
 
@@ -113,7 +109,7 @@ def atualizar(pesquisa_id):
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
     # =========================
-    # FAIXA ETÁRIA (JÁ TEXTO)
+    # FAIXA ETÁRIA
     # =========================
     ordem = [
         "16 a 24 anos",
@@ -173,29 +169,38 @@ def atualizar(pesquisa_id):
     )
 
     # =========================
-    # ENTREVISTADOR
+    # ENTREVISTADOR (TABELA)
     # =========================
     ent = df["entrevistador"].value_counts().reset_index()
-    ent.columns = ["entrevistador", "qtd"]
+    ent.columns = ["Entrevistador", "Quantidade"]
 
-    ent["pct"] = (ent["qtd"] / total * 100).round(1)
+    tabela = html.Table([
 
-    fig_ent = px.bar(
-        ent,
-        x="qtd",
-        y="entrevistador",
-        orientation="h",
-        text=ent["qtd"].astype(str) + " (" + ent["pct"].astype(str) + "%)"
-    )
+        html.Thead(
+            html.Tr([
+                html.Th("Entrevistador"),
+                html.Th("Quantidade")
+            ])
+        ),
 
-    fig_ent.update_layout(
-        title="Produção por Entrevistador",
-        yaxis={'categoryorder': 'total ascending'}
-    )
+        html.Tbody([
+            html.Tr([
+                html.Td(row["Entrevistador"]),
+                html.Td(row["Quantidade"])
+            ]) for _, row in ent.iterrows()
+        ])
 
-    return kpis, fig_bairro, fig_ent
+    ], style={
+        "width": "50%",
+        "border": "1px solid #ccc",
+        "padding": "10px"
+    })
 
+    return kpis, fig_bairro, tabela
 
+# =========================
+# ETL ENDPOINT
+# =========================
 @app.server.route("/etl")
 def rodar_etl():
     token = request.args.get("token")
@@ -210,6 +215,5 @@ def rodar_etl():
 # RUN
 # =========================
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8050))
     app.run(host="0.0.0.0", port=port)
