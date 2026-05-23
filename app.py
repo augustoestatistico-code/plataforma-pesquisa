@@ -5,6 +5,10 @@ import dash
 from dash import dcc, html, Input, Output
 import plotly.express as px
 
+from flask import request
+
+
+
 # =========================
 # CONEXÃO
 # =========================
@@ -191,8 +195,21 @@ def atualizar(pesquisa_id):
 
     return kpis, fig_bairro, fig_ent
 
+
+@app.server.route("/etl")
+def rodar_etl():
+    token = request.args.get("token")
+
+    if token != "123456":
+        return "Acesso negado", 403
+
+    os.system("python etl.py")
+    return "ETL executado com sucesso"
+
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
-    app.run(debug=True)
+    import os
+    port = int(os.environ.get("PORT", 8050))
+    app.run(host="0.0.0.0", port=port)
