@@ -140,13 +140,12 @@ def atualizar(pergunta):
     if df.empty:
         return "Sem dados", {}, "", {}, [], None
 
-    # KPI
     total = len(df)
+
     kpis = html.Div([
         html.H3(f"Total Entrevistas: {total}")
     ])
 
-    # BAIRRO
     bairro = df["localidade"].value_counts().reset_index()
     bairro.columns = ["bairro", "qtd"]
 
@@ -154,11 +153,9 @@ def atualizar(pergunta):
         bairro,
         x="qtd",
         y="bairro",
-        orientation="h",
-        title="Entrevistas por Bairro"
+        orientation="h"
     )
 
-    # ENTREVISTADOR
     ent = df["entrevistador"].value_counts().reset_index()
     ent.columns = ["Entrevistador", "Quantidade"]
 
@@ -175,15 +172,16 @@ def atualizar(pergunta):
         ])
     ])
 
-    # COLUNAS DINÂMICAS
     ignorar = ["id", "submission_id", "pesquisa_id", "dados"]
     colunas = [c for c in df.columns if c not in ignorar]
 
     opcoes = [{"label": c, "value": c} for c in colunas]
 
-    # GRÁFICO DINÂMICO
     if not pergunta:
-        pergunta = "SEXO" if "SEXO" in df.columns else colunas[0]
+        if "SEXO" in df.columns:
+            pergunta = "SEXO"
+        else:
+            pergunta = colunas[0]
 
     graf = df[pergunta].value_counts().reset_index()
     graf.columns = ["categoria", "qtd"]
@@ -192,40 +190,12 @@ def atualizar(pergunta):
         graf,
         x="qtd",
         y="categoria",
-        orientation="h",
-        title=f"Distribuição - {pergunta}"
+        orientation="h"
     )
 
-    # LOGO DESATIVADO (pra não quebrar)
     logo = None
 
     return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
-
-    # =========================
-    # LOGO
-    # =========================
-    logo = None
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT logo FROM usuarios WHERE email = :email
-        """), {"email": session.get("usuario")}).fetchone()
-
-        if result:
-            logo = None
-
-try:
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT logo FROM usuarios WHERE email = :email
-        """), {"email": session.get("usuario")}).fetchone()
-
-        if result:
-            logo = result[0]
-except:
-    logo = None
-
-   return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
-
 # =========================
 # PDF (simples)
 # =========================
