@@ -1,87 +1,76 @@
 import pandas as pd
 import psycopg2
-from flask import Flask, request, redirect, session
+from flask import Flask, request, session, redirect
 import dash
-from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+from dash import dcc, html, Input, Output
 import plotly.express as px
-import os
 
 # =========================
 # CONFIG
 # =========================
-DB_URL = os.getenv("DATABASE_URL")
+DB_URL = "SUA_URL_POSTGRES_AQUI"
 
 server = Flask(__name__)
-server.secret_key = "segredo_super"
+server.secret_key = "123"
 
 # =========================
-# FUNÇÃO BANCO
+# FUNÇÃO DE CONEXÃO
 # =========================
-def carregar_dados():
+def get_data():
     conn = psycopg2.connect(DB_URL)
-    
-    query = """
-    SELECT *
-    FROM respostas
-    """
-    
-    df = pd.read_sql(query, conn)
+    df = pd.read_sql("SELECT * FROM dados_pesquisa", conn)
     conn.close()
 
-    # PADRONIZA COLUNAS (EVITA ERRO PRA SEMPRE)
-    df.columns = df.columns.str.strip().str.upper()
+    # 🔥 NORMALIZA COLUNAS (resolve 90% dos erros)
+    df.columns = [c.lower() for c in df.columns]
 
     return df
 
-
 # =========================
-# LOGIN
+# LOGIN SIMPLES
 # =========================
 @server.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-
         senha = request.form.get("senha")
 
-        df = carregar_dados()
-
-        # DEBUG
-        print(df.columns)
-
-        if not df.empty and "PESQUISA_ID" in df.columns:
+        # 🔥 VALIDAÇÃO SIMPLES
+        if senha == "123":  
             session["logado"] = True
-            session["pesquisa_id"] = int(df.iloc[0]["PESQUISA_ID"])
+
+            # 🔥 evita erro de pesquisa_id inexistente
+            session["pesquisa_id"] = 1
+
             return redirect("/")
         else:
-            return "Erro: coluna PESQUISA_ID não encontrada"
+            return "Senha incorreta"
 
-    return """
-    <h2>Login</h2>
-    <form method="post">
-        <input type="password" name="senha" placeholder="Senha"/>
-        <input type="submit"/>
-    </form>
-    """
+    return '''
+        <form method="post">
+            <input type="password" name="senha" placeholder="Senha"/>
+            <input type="submit"/>
+        </form>
+    '''
 
+@server.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
 
 # =========================
-# DASH
+# DASH APP
 # =========================
 app = dash.Dash(__name__, server=server, url_base_pathname="/")
 
 app.layout = html.Div([
-    
-    html.H2("📊 Dashboard Pesquisa"),
-
-    dcc.Dropdown(id="filtro_pergunta", placeholder="Selecione pergunta"),
+    html.H2("DASHBOARD DE PESQUISA"),
 
     html.Div(id="kpis"),
 
+    dcc.Dropdown(id="pergunta"),
+
     dcc.Graph(id="grafico")
-
 ])
-
 
 # =========================
 # CALLBACK
@@ -89,101 +78,80 @@ app.layout = html.Div([
 @app.callback(
     Output("kpis", "children"),
     Output("grafico", "figure"),
-    Input("filtro_pergunta", "value")
+    Output("pergunta", "options"),
+    Input("pergunta", "value")
 )
 def atualizar(pergunta):
 
-    df = carregar_dados()
+    # 🔐 PROTEÇÃO LOGIN
+    if not session.get("logado"):
+        return "Faça login", {}, []
 
-    # GARANTIA TOTAL
-    df.columns = df.columns.str.strip().str.upper()
-
-    # =========================
-    # TRATAMENTO DE SEGURANÇA
-    # =========================
-    if "SEXO" not in df.columns:
-        df["SEXO"] = "Não informado"
-
-    if "IDADE" not in df.columns:
-        df["IDADE"] = "Não informado"
+    df = get_data()
 
     # =========================
-    # KPIs
+    # GARANTE COLUNAS
+    # =========================
+    if "sexo" not in df.columns:
+        df["sexo"] = "Não informado"
+
+    if "idade" not in df.columns:
+        df["idade"] = "Não informado"
+
+    # =========================
+    # KPI TOTAL
     # =========================
     total = len(df)
 
-    sexo = df["SEXO"].value_counts(normalize=True).reset_index()
-    sexo.columns = ["SEXO", "%"]
-    sexo["%"] = (sexo["%"] * 100).round(1)
+    sexo = df["sexo"].value_counts(normalize=True).reset_index()
+    sexo.columns = ["sexo", "perc"]
 
-    idade = df["IDADE"].value_counts(normalize=True).reset_index()
-    idade.columns = ["IDADE", "%"]
-    idade["%"] = (idade["%"] * 100).round(1)
+    tabela_sexo = html.Table([
+        html.Tr([html.Th("Sexo"), html.Th("%")])] +
+        [html.Tr([html.Td(row["sexo"]), html.Td(f"{row['perc']*100:.1f}%")])
+         for _, row in sexo.iterrows()]
+    )
 
     kpis = html.Div([
-
-        html.H3(f"Amostra Total: {total}"),
-
-        html.H4("Sexo"),
-        dash_table.DataTable(
-            data=sexo.to_dict("records"),
-            columns=[{"name": i, "id": i} for i in sexo.columns]
-        ),
-
-        html.H4("Idade"),
-        dash_table.DataTable(
-            data=idade.to_dict("records"),
-            columns=[{"name": i, "id": i} for i in idade.columns]
-        )
+        html.H4(f"Total da Amostra: {total}"),
+        tabela_sexo
     ])
 
     # =========================
-    # PERGUNTAS AUTOMÁTICAS
+    # PERGUNTAS DINÂMICAS
     # =========================
-    perguntas = [
-        col for col in df.columns
-        if col not in ["ID", "PESQUISA_ID", "SEXO", "IDADE", "LOCALIDADE"]
-    ]
+    perguntas = [c for c in df.columns if c not in ["sexo", "idade", "id"]]
+
+    opcoes = [{"label": p, "value": p} for p in perguntas]
+
+    if not pergunta and perguntas:
+        pergunta = perguntas[0]
 
     # =========================
     # GRÁFICO
     # =========================
-    if pergunta and pergunta in df.columns:
-
+    if pergunta in df.columns:
         graf = df[pergunta].value_counts(normalize=True).reset_index()
-        graf.columns = ["Resposta", "%"]
-        graf["%"] = graf["%"] * 100
+        graf.columns = ["resposta", "perc"]
 
         fig = px.bar(
             graf,
-            x="Resposta",
-            y="%",
-            text=graf["%"].apply(lambda x: f"{x:.1f}%")
+            x="resposta",
+            y="perc",
+            text=graf["perc"].apply(lambda x: f"{x*100:.1f}%")
         )
 
         fig.update_traces(textposition="outside")
+        fig.update_layout(yaxis_tickformat=".0%")
 
     else:
-        fig = px.bar(title="Selecione uma pergunta")
+        fig = {}
 
-    return kpis, fig
-
-
-# =========================
-# PROTEÇÃO LOGIN
-# =========================
-@server.before_request
-def proteger():
-    if request.path.startswith("/_dash"):
-        return
-    if request.path == "/login":
-        return
-    if not session.get("logado"):
-        return redirect("/login")
+    return kpis, fig, opcoes
 
 
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
-    app.run(debug=True)
+    server.run(debug=True)
