@@ -1,58 +1,62 @@
 import pandas as pd
 import psycopg2
+import json
+
 from flask import Flask, request, redirect, session
 import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
-import os
 
-# ==============================
+# =========================
 # CONFIG
-# ==============================
+# =========================
+
 app = Flask(__name__)
 app.secret_key = "segredo123"
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# conexão supabase (ALTERE)
+conn = psycopg2.connect(
+    host="SEU_HOST",
+    database="SEU_DB",
+    user="SEU_USER",
+    password="SEU_PASSWORD"
+)
 
-def conectar():
-    return psycopg2.connect(DATABASE_URL)
+# =========================
+# LOGIN
+# =========================
 
-# ==============================
-# LOGIN (CORRIGIDO)
-# ==============================
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         email = request.form["email"]
         senha = request.form["senha"]
 
-        conn = conectar()
-
         df = pd.read_sql(f"""
-            SELECT * FROM usuarios
-            WHERE email = '{email}'
+        SELECT * FROM usuarios
+        WHERE email = '{email}' AND senha = '{senha}'
         """, conn)
 
-        conn.close()
+        if not df.empty:
+            session["cliente_id"] = int(df.iloc[0]["cliente_id"])
+            session["logo"] = df.iloc[0]["logo"]
 
-        if df.empty:
-            return "Usuário não encontrado"
+            # pega pesquisa do cliente
+            pesquisa = pd.read_sql(f"""
+            SELECT * FROM pesquisas
+            WHERE cliente_id = {session["cliente_id"]}
+            LIMIT 1
+            """, conn)
 
-        user = df.iloc[0]
+            if not pesquisa.empty:
+                session["pesquisa_id"] = int(pesquisa.iloc[0]["id"])
 
-        if str(user["senha"]) != str(senha):
-            return "Senha incorreta"
+            return redirect("/")
 
-        # salva sessão
-        session["usuario"] = email
-        session["cliente_id"] = int(user["cliente_id"])
-        session["logo"] = user["logo"]
-
-        return redirect("/")
+        return "Login inválido"
 
     return """
-    <h2>Login</h2>
     <form method="post">
         Email: <input name="email"><br>
         Senha: <input name="senha" type="password"><br>
@@ -60,125 +64,120 @@ def login():
     </form>
     """
 
-# ==============================
+# =========================
 # DASH
-# ==============================
-dash_app = dash.Dash(__name__, server=app, url_base_pathname="/")
+# =========================
+
+dash_app = dash.Dash(
+    __name__,
+    server=app,
+    url_base_pathname="/"
+)
 
 dash_app.layout = html.Div([
     html.H2("Dashboard Pesquisa"),
 
-    dcc.Dropdown(id="pergunta"),
+    dcc.Interval(id="interval", interval=2000, n_intervals=0),
 
     html.Div(id="kpis"),
+    dcc.Dropdown(id="pergunta"),
     dcc.Graph(id="grafico"),
+
     dash_table.DataTable(id="tabela")
 ])
 
-# ==============================
+# =========================
 # CALLBACK
-# ==============================
+# =========================
+
 @dash_app.callback(
-    [Output("kpis", "children"),
-     Output("grafico", "figure"),
-     Output("tabela", "data"),
-     Output("pergunta", "options")],
-    [Input("pergunta", "value")]
+    [
+        Output("kpis", "children"),
+        Output("pergunta", "options"),
+        Output("grafico", "figure"),
+        Output("tabela", "data")
+    ],
+    [Input("interval", "n_intervals")]
 )
-def atualizar(pergunta):
+def atualizar(n):
 
-    if "cliente_id" not in session:
-        return "Faça login", {}, [], []
+    if "pesquisa_id" not in session:
+        return "Faça login em /login", [], {}, []
 
-    cliente_id = session["cliente_id"]
-
-    conn = conectar()
-
-    # 🔗 BUSCA PESQUISA DO CLIENTE
-    pesquisa = pd.read_sql(f"""
-        SELECT id FROM pesquisas
-        WHERE cliente_id = {cliente_id}
-        LIMIT 1
-    """, conn)
-
-    if pesquisa.empty:
-        conn.close()
-        return "Sem pesquisa", {}, [], []
-
-    pesquisa_id = int(pesquisa.iloc[0]["id"])
-
-    # 🔗 BUSCA DADOS
+    # =========================
+    # LER DADOS
+    # =========================
     df = pd.read_sql(f"""
-        SELECT * FROM dados_pesquisa
-        WHERE pesquisa_id = {pesquisa_id}
+    SELECT * FROM entrevistas
+    WHERE pesquisa_id = {session['pesquisa_id']}
     """, conn)
-
-    conn.close()
 
     if df.empty:
-        return "Sem dados", {}, [], []
+        return "Sem dados (rode /etl)", [], {}, []
 
-    # normaliza
-    df.columns = [c.upper() for c in df.columns]
+    # =========================
+    # JSON ODK
+    # =========================
+    df_json = pd.json_normalize(df["dados"].apply(json.loads))
 
-    total = len(df)
-
-    # ==============================
+    # =========================
     # KPIs
-    # ==============================
-    sexo = pd.DataFrame()
-    idade = pd.DataFrame()
-
-    if "SEXO" in df.columns:
-        sexo = df["SEXO"].value_counts().reset_index()
-        sexo.columns = ["SEXO", "TOTAL"]
-        sexo["%"] = round(sexo["TOTAL"] / total * 100, 1)
-
-    if "IDADE" in df.columns:
-        idade = df["IDADE"].value_counts().reset_index()
-        idade.columns = ["IDADE", "TOTAL"]
-        idade["%"] = round(idade["TOTAL"] / total * 100, 1)
+    # =========================
+    total = len(df_json)
 
     kpis = html.Div([
-        html.H4(f"Amostra Total: {total}"),
-        html.H5("Sexo"),
-        dash_table.DataTable(data=sexo.to_dict("records")),
-        html.H5("Idade"),
-        dash_table.DataTable(data=idade.to_dict("records"))
+        html.H3(f"Amostra: {total}")
     ])
 
-    # ==============================
-    # PERGUNTAS
-    # ==============================
-    perguntas = [c for c in df.columns if c not in ["SEXO", "IDADE", "PESQUISA_ID"]]
+    # =========================
+    # LISTA DE PERGUNTAS DINÂMICAS
+    # =========================
+    perguntas = df_json.columns.tolist()
 
     opcoes = [{"label": p, "value": p} for p in perguntas]
 
-    if not pergunta:
-        pergunta = perguntas[0]
+    if not perguntas:
+        return kpis, [], {}, []
 
-    # ==============================
+    pergunta = perguntas[0]
+
+    # =========================
     # GRÁFICO
-    # ==============================
-    graf = df[pergunta].value_counts().reset_index()
-    graf.columns = ["Resposta", "Total"]
-    graf["%"] = round(graf["Total"] / total * 100, 1)
+    # =========================
+    contagem = df_json[pergunta].value_counts(normalize=True) * 100
+    contagem = contagem.reset_index()
+    contagem.columns = ["resposta", "percentual"]
 
     fig = px.bar(
-        graf,
-        x="Resposta",
-        y="Total",
-        text=graf["%"].astype(str) + "%"
+        contagem,
+        x="resposta",
+        y="percentual",
+        text=contagem["percentual"].round(1)
     )
 
-    fig.update_traces(textposition="outside")
+    fig.update_traces(
+        texttemplate="%{text}%",
+        textposition="outside"
+    )
 
-    return kpis, fig, graf.to_dict("records"), opcoes
+    # =========================
+    # TABELA
+    # =========================
+    tabela = df_json.head(50).to_dict("records")
 
-# ==============================
+    return kpis, opcoes, fig, tabela
+
+
+# =========================
+# ETL (SIMPLES MOCK)
+# =========================
+
+@app.route("/etl")
+def etl():
+    return "ETL OK (implementar integração ODK aqui)"
+
+# =========================
 # RUN
-# ==============================
-server = app
+# =========================
 
-if __name__ == "__main__":
-    app.run(debug=True)
+server = app
