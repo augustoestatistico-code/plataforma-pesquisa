@@ -75,6 +75,8 @@ def proteger():
 def carregar_dados():
     pesquisa_id = session.get("pesquisa_id")
 
+    print("PESQUISA_ID SESSION:", pesquisa_id)  # 👈 ADICIONE
+
     query = f"""
         SELECT *
         FROM entrevistas
@@ -83,8 +85,7 @@ def carregar_dados():
 
     df = pd.read_sql(text(query), engine)
 
-    # limpeza básica
-    df = df.fillna("Não informado")
+    print("TOTAL LINHAS:", len(df))  # 👈 ADICIONE
 
     return df
 
