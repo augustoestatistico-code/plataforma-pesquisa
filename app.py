@@ -25,33 +25,27 @@ server.secret_key = "segredo"
 @app.server.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form.get("email")
-        senha = request.form.get("senha")
+        email = request.form["email"]
+        senha = request.form["senha"]
 
-        query = f"""
+        df = pd.read_sql(f"""
             SELECT * FROM usuarios
             WHERE email = '{email}' AND senha = '{senha}'
-        """
-
-        df = pd.read_sql(query, engine)
-df.columns = df.columns.str.strip().str.upper()
-
-print("COLUNAS:", df.columns)
+        """, engine)
 
         if not df.empty:
             session["usuario"] = df.iloc[0]["email"]
             return redirect("/")
+        else:
+            return "Login inválido"
 
-        return "Login inválido"
-
-    return """
-    <h2>Login</h2>
-    <form method="post">
-        Email: <input name="email"><br>
-        Senha: <input name="senha" type="password"><br>
-        <button type="submit">Entrar</button>
-    </form>
-    """
+    return '''
+        <form method="post">
+            <input name="email" placeholder="Email">
+            <input name="senha" type="password" placeholder="Senha">
+            <button type="submit">Entrar</button>
+        </form>
+    '''
 
 # =========================
 # PROTEÇÃO
