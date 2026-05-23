@@ -34,10 +34,12 @@ def login():
         """
 
         df = pd.read_sql(query, engine)
+df.columns = df.columns.str.strip().str.upper()
+
+print("COLUNAS:", df.columns)
 
         if not df.empty:
-            session["usuario"] = email
-            session["pesquisa_id"] = int(df.iloc[0]["pesquisa_id"])
+            session["usuario"] = df.iloc[0]["email"]
             return redirect("/")
 
         return "Login inválido"
