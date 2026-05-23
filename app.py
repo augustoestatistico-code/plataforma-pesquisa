@@ -115,6 +115,11 @@ def atualizar(n):
 
     df = carregar_dados(session["cliente_id"])
 
+    # 🔥 DEBUG AQUI
+    print("COLUNAS:", df.columns)
+    print("TOTAL:", len(df))
+    print(df.head())
+
     if df.empty:
         return "Sem dados", {}, {}
 
