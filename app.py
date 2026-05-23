@@ -1,157 +1,166 @@
 import pandas as pd
 import psycopg2
-from flask import Flask, request, session, redirect
+from flask import Flask, render_template_string, request, redirect, session
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, dash_table
+from dash.dependencies import Input, Output
 import plotly.express as px
+import os
 
-# =========================
+# ==============================
 # CONFIG
-# =========================
-DB_URL = "SUA_URL_POSTGRES_AQUI"
+# ==============================
+app = Flask(__name__)
+app.secret_key = "segredo123"
 
-server = Flask(__name__)
-server.secret_key = "123"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# =========================
-# FUNÇÃO DE CONEXÃO
-# =========================
-def get_data():
-    conn = psycopg2.connect(DB_URL)
-    df = pd.read_sql("SELECT * FROM dados_pesquisa", conn)
-    conn.close()
+def conectar():
+    return psycopg2.connect(DATABASE_URL)
 
-    # 🔥 NORMALIZA COLUNAS (resolve 90% dos erros)
-    df.columns = [c.lower() for c in df.columns]
-
-    return df
-
-# =========================
-# LOGIN SIMPLES
-# =========================
-@server.route("/login", methods=["GET", "POST"])
+# ==============================
+# LOGIN
+# ==============================
+@app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        senha = request.form.get("senha")
+        usuario = request.form["usuario"]
+        senha = request.form["senha"]
 
-        # 🔥 VALIDAÇÃO SIMPLES
-        if senha == "123":  
-            session["logado"] = True
+        conn = conectar()
+        df = pd.read_sql(f"""
+            SELECT * FROM usuarios
+            WHERE usuario = '{usuario}'
+        """, conn)
 
-            # 🔥 evita erro de pesquisa_id inexistente
-            session["pesquisa_id"] = 1
+        conn.close()
 
-            return redirect("/")
-        else:
+        # validação segura
+        if df.empty:
+            return "Usuário não encontrado"
+
+        # pega primeira linha
+        user = df.iloc[0]
+
+        # valida senha
+        if str(user["senha"]) != str(senha):
             return "Senha incorreta"
 
-    return '''
-        <form method="post">
-            <input type="password" name="senha" placeholder="Senha"/>
-            <input type="submit"/>
-        </form>
-    '''
+        # salva sessão
+        session["usuario"] = usuario
 
-@server.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/login")
+        # se existir pesquisa_id, salva
+        if "pesquisa_id" in df.columns:
+            session["pesquisa_id"] = int(user["pesquisa_id"])
 
-# =========================
-# DASH APP
-# =========================
-app = dash.Dash(__name__, server=server, url_base_pathname="/")
+        return redirect("/")
 
-app.layout = html.Div([
-    html.H2("DASHBOARD DE PESQUISA"),
+    return """
+    <h2>Login</h2>
+    <form method="post">
+        Usuário: <input name="usuario"><br>
+        Senha: <input name="senha" type="password"><br>
+        <button type="submit">Entrar</button>
+    </form>
+    """
 
-    html.Div(id="kpis"),
+# ==============================
+# DASHBOARD
+# ==============================
+dash_app = dash.Dash(__name__, server=app, url_base_pathname="/")
+
+dash_app.layout = html.Div([
+    html.H2("Dashboard Pesquisa"),
 
     dcc.Dropdown(id="pergunta"),
 
-    dcc.Graph(id="grafico")
+    html.Div(id="kpis"),
+    dcc.Graph(id="grafico"),
+    dash_table.DataTable(id="tabela")
 ])
 
-# =========================
+# ==============================
 # CALLBACK
-# =========================
-@app.callback(
-    Output("kpis", "children"),
-    Output("grafico", "figure"),
-    Output("pergunta", "options"),
-    Input("pergunta", "value")
+# ==============================
+@dash_app.callback(
+    [Output("kpis", "children"),
+     Output("grafico", "figure"),
+     Output("tabela", "data"),
+     Output("pergunta", "options")],
+    [Input("pergunta", "value")]
 )
 def atualizar(pergunta):
 
-    # 🔐 PROTEÇÃO LOGIN
-    if not session.get("logado"):
-        return "Faça login", {}, []
+    conn = conectar()
+    df = pd.read_sql("SELECT * FROM dados_pesquisa", conn)
+    conn.close()
 
-    df = get_data()
+    # ==============================
+    # NORMALIZA COLUNAS (ANTI-ERRO)
+    # ==============================
+    df.columns = [c.upper() for c in df.columns]
 
-    # =========================
-    # GARANTE COLUNAS
-    # =========================
-    if "sexo" not in df.columns:
-        df["sexo"] = "Não informado"
-
-    if "idade" not in df.columns:
-        df["idade"] = "Não informado"
-
-    # =========================
-    # KPI TOTAL
-    # =========================
+    # ==============================
+    # KPIs
+    # ==============================
     total = len(df)
 
-    sexo = df["sexo"].value_counts(normalize=True).reset_index()
-    sexo.columns = ["sexo", "perc"]
+    # sexo (se existir)
+    if "SEXO" in df.columns:
+        sexo = df["SEXO"].value_counts().reset_index()
+        sexo.columns = ["SEXO", "TOTAL"]
+        sexo["%"] = round(sexo["TOTAL"] / total * 100, 1)
+    else:
+        sexo = pd.DataFrame()
 
-    tabela_sexo = html.Table([
-        html.Tr([html.Th("Sexo"), html.Th("%")])] +
-        [html.Tr([html.Td(row["sexo"]), html.Td(f"{row['perc']*100:.1f}%")])
-         for _, row in sexo.iterrows()]
-    )
+    # idade (se existir)
+    if "IDADE" in df.columns:
+        idade = df["IDADE"].value_counts().reset_index()
+        idade.columns = ["IDADE", "TOTAL"]
+        idade["%"] = round(idade["TOTAL"] / total * 100, 1)
+    else:
+        idade = pd.DataFrame()
 
     kpis = html.Div([
-        html.H4(f"Total da Amostra: {total}"),
-        tabela_sexo
+        html.H4(f"Amostra Total: {total}"),
+        html.H5("Sexo"),
+        dash_table.DataTable(data=sexo.to_dict("records")),
+        html.H5("Idade"),
+        dash_table.DataTable(data=idade.to_dict("records"))
     ])
 
-    # =========================
-    # PERGUNTAS DINÂMICAS
-    # =========================
-    perguntas = [c for c in df.columns if c not in ["sexo", "idade", "id"]]
+    # ==============================
+    # PERGUNTAS AUTOMÁTICAS
+    # ==============================
+    perguntas = [c for c in df.columns if c not in ["SEXO", "IDADE"]]
 
     opcoes = [{"label": p, "value": p} for p in perguntas]
 
-    if not pergunta and perguntas:
+    if not pergunta:
         pergunta = perguntas[0]
 
-    # =========================
+    # ==============================
     # GRÁFICO
-    # =========================
-    if pergunta in df.columns:
-        graf = df[pergunta].value_counts(normalize=True).reset_index()
-        graf.columns = ["resposta", "perc"]
+    # ==============================
+    graf = df[pergunta].value_counts().reset_index()
+    graf.columns = ["Resposta", "Total"]
+    graf["%"] = round(graf["Total"] / total * 100, 1)
 
-        fig = px.bar(
-            graf,
-            x="resposta",
-            y="perc",
-            text=graf["perc"].apply(lambda x: f"{x*100:.1f}%")
-        )
+    fig = px.bar(
+        graf,
+        x="Resposta",
+        y="Total",
+        text=graf["%"].astype(str) + "%"
+    )
 
-        fig.update_traces(textposition="outside")
-        fig.update_layout(yaxis_tickformat=".0%")
+    fig.update_traces(textposition="outside")
 
-    else:
-        fig = {}
+    return kpis, fig, graf.to_dict("records"), opcoes
 
-    return kpis, fig, opcoes
-
-
-# =========================
+# ==============================
 # RUN
-# =========================
+# ==============================
+server = app
+
 if __name__ == "__main__":
-    server.run(debug=True)
+    app.run(debug=True)
