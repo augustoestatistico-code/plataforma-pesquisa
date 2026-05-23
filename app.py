@@ -217,9 +217,20 @@ def atualizar(pergunta):
         """), {"email": session.get("usuario")}).fetchone()
 
         if result:
-            logo = result[0]
+            logo = None
 
-    return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
+try:
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT logo FROM usuarios WHERE email = :email
+        """), {"email": session.get("usuario")}).fetchone()
+
+        if result:
+            logo = result[0]
+except:
+    logo = None
+
+   return kpis, fig_bairro, tabela, fig_dinamico, opcoes, logo
 
 # =========================
 # PDF (simples)
