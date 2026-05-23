@@ -1,6 +1,6 @@
 import pandas as pd
 import psycopg2
-from flask import Flask, render_template_string, request, redirect, session
+from flask import Flask, request, redirect, session
 import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
@@ -19,53 +19,49 @@ def conectar():
     return psycopg2.connect(DATABASE_URL)
 
 # ==============================
-# LOGIN
+# LOGIN (CORRIGIDO)
 # ==============================
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        usuario = request.form["usuario"]
+        email = request.form["email"]
         senha = request.form["senha"]
 
         conn = conectar()
+
         df = pd.read_sql(f"""
             SELECT * FROM usuarios
-            WHERE usuario = '{usuario}'
+            WHERE email = '{email}'
         """, conn)
 
         conn.close()
 
-        # validação segura
         if df.empty:
             return "Usuário não encontrado"
 
-        # pega primeira linha
         user = df.iloc[0]
 
-        # valida senha
         if str(user["senha"]) != str(senha):
             return "Senha incorreta"
 
         # salva sessão
-        session["usuario"] = usuario
-
-        # se existir pesquisa_id, salva
-        if "pesquisa_id" in df.columns:
-            session["pesquisa_id"] = int(user["pesquisa_id"])
+        session["usuario"] = email
+        session["cliente_id"] = int(user["cliente_id"])
+        session["logo"] = user["logo"]
 
         return redirect("/")
 
     return """
     <h2>Login</h2>
     <form method="post">
-        Usuário: <input name="usuario"><br>
+        Email: <input name="email"><br>
         Senha: <input name="senha" type="password"><br>
         <button type="submit">Entrar</button>
     </form>
     """
 
 # ==============================
-# DASHBOARD
+# DASH
 # ==============================
 dash_app = dash.Dash(__name__, server=app, url_base_pathname="/")
 
@@ -91,35 +87,57 @@ dash_app.layout = html.Div([
 )
 def atualizar(pergunta):
 
+    if "cliente_id" not in session:
+        return "Faça login", {}, [], []
+
+    cliente_id = session["cliente_id"]
+
     conn = conectar()
-    df = pd.read_sql("SELECT * FROM dados_pesquisa", conn)
+
+    # 🔗 BUSCA PESQUISA DO CLIENTE
+    pesquisa = pd.read_sql(f"""
+        SELECT id FROM pesquisas
+        WHERE cliente_id = {cliente_id}
+        LIMIT 1
+    """, conn)
+
+    if pesquisa.empty:
+        conn.close()
+        return "Sem pesquisa", {}, [], []
+
+    pesquisa_id = int(pesquisa.iloc[0]["id"])
+
+    # 🔗 BUSCA DADOS
+    df = pd.read_sql(f"""
+        SELECT * FROM dados_pesquisa
+        WHERE pesquisa_id = {pesquisa_id}
+    """, conn)
+
     conn.close()
 
-    # ==============================
-    # NORMALIZA COLUNAS (ANTI-ERRO)
-    # ==============================
+    if df.empty:
+        return "Sem dados", {}, [], []
+
+    # normaliza
     df.columns = [c.upper() for c in df.columns]
+
+    total = len(df)
 
     # ==============================
     # KPIs
     # ==============================
-    total = len(df)
+    sexo = pd.DataFrame()
+    idade = pd.DataFrame()
 
-    # sexo (se existir)
     if "SEXO" in df.columns:
         sexo = df["SEXO"].value_counts().reset_index()
         sexo.columns = ["SEXO", "TOTAL"]
         sexo["%"] = round(sexo["TOTAL"] / total * 100, 1)
-    else:
-        sexo = pd.DataFrame()
 
-    # idade (se existir)
     if "IDADE" in df.columns:
         idade = df["IDADE"].value_counts().reset_index()
         idade.columns = ["IDADE", "TOTAL"]
         idade["%"] = round(idade["TOTAL"] / total * 100, 1)
-    else:
-        idade = pd.DataFrame()
 
     kpis = html.Div([
         html.H4(f"Amostra Total: {total}"),
@@ -130,9 +148,9 @@ def atualizar(pergunta):
     ])
 
     # ==============================
-    # PERGUNTAS AUTOMÁTICAS
+    # PERGUNTAS
     # ==============================
-    perguntas = [c for c in df.columns if c not in ["SEXO", "IDADE"]]
+    perguntas = [c for c in df.columns if c not in ["SEXO", "IDADE", "PESQUISA_ID"]]
 
     opcoes = [{"label": p, "value": p} for p in perguntas]
 
