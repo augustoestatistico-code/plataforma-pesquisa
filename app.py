@@ -624,49 +624,58 @@ def atualizar(pesquisa_id):
         if isinstance(item, dict):
             todas_chaves.update(item.keys())
 
-    chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)][:12]
+chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)][:12]
 
-    for chave in chaves_validas:
-        valores = []
+for chave in chaves_validas:
+    valores = []
 
-        for item in respostas:
-            if isinstance(item, dict):
-                valor = item.get(chave)
-                if valor not in [None, "", "nan"]:
-                    valores.append(str(valor).strip())
+    for item in respostas:
+        if isinstance(item, dict):
+            valor = item.get(chave)
+            if valor not in [None, "", "nan"]:
+                valores.append(str(valor).strip())
 
-        if not valores:
-            continue
+    if not valores:
+        continue
 
     contagem = pd.Series(valores).value_counts().reset_index()
 
+    # pula perguntas abertas com respostas demais
     if len(contagem) > 30:
         continue
 
-        contagem.columns = ["Resposta", "Quantidade"]
-        contagem["Percentual"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
-        contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["Percentual"].astype(str) + "%)"
+    contagem.columns = ["Resposta", "Quantidade"]
+    contagem["Percentual"] = (
+        contagem["Quantidade"] / contagem["Quantidade"].sum() * 100
+    ).round(1)
 
-        fig = px.bar(
-            contagem.sort_values("Quantidade", ascending=True),
-            x="Quantidade",
-            y="Resposta",
-            orientation="h",
-            text="Texto",
-            title=str(chave)
-        )
+    contagem["Texto"] = (
+        contagem["Quantidade"].astype(str)
+        + " ("
+        + contagem["Percentual"].astype(str)
+        + "%)"
+    )
 
-        fig.update_layout(
-            paper_bgcolor="#111827",
-            plot_bgcolor="#111827",
-            font_color="white",
-            margin=dict(l=20, r=20, t=60, b=20)
-        )
+    fig = px.bar(
+        contagem.sort_values("Quantidade", ascending=True),
+        x="Quantidade",
+        y="Resposta",
+        orientation="h",
+        text="Texto",
+        title=str(chave)
+    )
 
-        questoes.append(html.Div([
-            dcc.Graph(figure=fig),
-            gerar_tabela(contagem)
-        ], className="questao-card"))
+    fig.update_layout(
+        paper_bgcolor="#111827",
+        plot_bgcolor="#111827",
+        font_color="white",
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
+
+    questoes.append(html.Div([
+        dcc.Graph(figure=fig),
+        gerar_tabela(contagem)
+    ], className="questao-card"))
 
     if not questoes:
         questoes = html.Div("Nenhuma questão dinâmica encontrada no campo dados.")
