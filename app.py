@@ -139,8 +139,11 @@ def lista_pesquisas(cliente_id):
 
 
 def carregar_dados(pesquisa_id):
-    df = pd.read_sql(text("""
-        SELECT 
+
+    print("PESQUISA RECEBIDA:", pesquisa_id)
+
+    query = text("""
+        SELECT
             pesquisa_id,
             sexo,
             idade,
@@ -148,20 +151,28 @@ def carregar_dados(pesquisa_id):
             entrevistador,
             dados
         FROM entrevistas
-        WHERE pesquisa_id = :pesquisa_id
-    """), engine, params={"pesquisa_id": pesquisa_id})
+        WHERE pesquisa_id=:pesquisa_id
+    """)
 
-    if df.empty:
-        return df
+    df = pd.read_sql(
+        query,
+        engine,
+        params={
+            "pesquisa_id": int(pesquisa_id)
+        }
+    )
 
-    for col in ["sexo", "idade", "localidade", "entrevistador"]:
-        df[col] = df[col].fillna("Não informado").astype(str).str.strip()
+    print("TOTAL LINHAS:",len(df))
 
-    df["sexo"] = df["sexo"].str.title()
-    df["localidade"] = df["localidade"].str.upper()
+    if not df.empty:
+        print(df.head())
 
     return df
 
+options=lista_pesquisas(cliente_id)
+
+print("CLIENTE:",cliente_id)
+print("PESQUISAS:",options)
 
 def tabela_freq(df, coluna):
     base = df[coluna].value_counts(dropna=False).reset_index()
