@@ -1,46 +1,45 @@
 import os
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import dash
 from dash import dcc, html, Input, Output
 import plotly.express as px
-from flask import request, session, redirect
+from flask import Flask, request, session, redirect
 
 # =========================
-# CONEXÃO
+# CONFIG
 # =========================
 DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL)
+SECRET_KEY = "supersecret"
 
-# =========================
-# APP
-# =========================
-app = dash.Dash(__name__)
-server = app.server
-server.secret_key = "segredo"
+server = Flask(__name__)
+server.secret_key = SECRET_KEY
+
+engine = create_engine(DATABASE_URL)
 
 # =========================
 # LOGIN
 # =========================
-@app.server.route("/login", methods=["GET", "POST"])
+@server.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form.get("email")
-        senha = request.form.get("senha")
+        email = request.form["email"]
+        senha = request.form["senha"]
 
-        query = f"""
-            SELECT * FROM usuarios
-            WHERE email = '{email}' AND senha = '{senha}'
-        """
+        query = text("""
+            SELECT id, cliente_id
+            FROM usuarios
+            WHERE email = :email AND senha = :senha
+        """)
 
-        df = pd.read_sql(query, engine)
+        user = engine.execute(query, {"email": email, "senha": senha}).fetchone()
 
-        if not df.empty:
-            session["usuario"] = email
-            session["pesquisa_id"] = int(df.iloc[0]["pesquisa_id"])
-            return redirect("/")
-
-        return "Login inválido"
+        if user:
+            session["user_id"] = user[0]
+            session["cliente_id"] = user[1]
+            return redirect("/dashboard")
+        else:
+            return "Login inválido"
 
     return """
     <h2>Login</h2>
@@ -52,33 +51,50 @@ def login():
     """
 
 # =========================
-# PROTEÇÃO
+# DASH
 # =========================
-@app.server.before_request
+app = dash.Dash(
+    __name__,
+    server=server,
+    url_base_pathname="/dashboard/"
+)
+
+# =========================
+# PROTEGER ROTA
+# =========================
+@server.before_request
 def proteger():
-    if request.path == "/login":
-        return
-
-    if "usuario" not in session:
-        return redirect("/login")
+    if request.path.startswith("/dashboard"):
+        if "cliente_id" not in session:
+            return redirect("/")
 
 # =========================
-# DADOS
+# LISTA PESQUISAS DO CLIENTE
 # =========================
-def carregar_dados():
-    pesquisa_id = session.get("pesquisa_id")
+def lista_pesquisas(cliente_id):
+    df = pd.read_sql(text("""
+        SELECT id, nome
+        FROM pesquisas
+        WHERE cliente_id = :cliente_id
+    """), engine, params={"cliente_id": cliente_id})
 
-    if not pesquisa_id:
-        pesquisa_id = 1
+    return [{"label": row["nome"], "value": row["id"]} for _, row in df.iterrows()]
 
-    query = f"""
+# =========================
+# CARREGAR DADOS
+# =========================
+def carregar_dados(pesquisa_id):
+    df = pd.read_sql(text("""
         SELECT *
         FROM entrevistas
-        WHERE pesquisa_id = {pesquisa_id}
-    """
+        WHERE pesquisa_id = :pesquisa_id
+    """), engine, params={"pesquisa_id": pesquisa_id})
 
-    df = pd.read_sql(query, engine)
-    df = df.fillna("Não informado")
+    if df.empty:
+        return df
+
+    df["sexo"] = df["sexo"].str.title()
+    df["localidade"] = df["localidade"].str.upper()
 
     return df
 
@@ -89,145 +105,109 @@ app.layout = html.Div([
 
     html.H1("📊 DASHBOARD ELEITORAL"),
 
+    dcc.Dropdown(id="pesquisa"),
+
     html.Div(id="kpis"),
 
-    dcc.Dropdown(
-        id="filtro-pergunta",
-        placeholder="Escolha a pergunta",
-        style={"width": "50%"}
-    ),
+    dcc.Graph(id="sexo"),
+    dcc.Graph(id="bairro"),
 
-    dcc.Graph(id="grafico-dinamico"),
+    html.Div(id="idade"),
+    html.Div(id="entrevistador"),
 
-    html.H3("Entrevistadores"),
-    html.Div(id="tabela-entrevistador"),
-
+    html.H3("Resultados das Perguntas"),
+    html.Div(id="perguntas")
 ])
 
 # =========================
-# CALLBACK
+# CALLBACK PRINCIPAL
 # =========================
 @app.callback(
     [
+        Output("pesquisa", "options"),
         Output("kpis", "children"),
-        Output("grafico-dinamico", "figure"),
-        Output("tabela-entrevistador", "children"),
-        Output("filtro-pergunta", "options"),
+        Output("sexo", "figure"),
+        Output("bairro", "figure"),
+        Output("idade", "children"),
+        Output("entrevistador", "children"),
+        Output("perguntas", "children")
     ],
-    Input("filtro-pergunta", "value")
+    Input("pesquisa", "value")
 )
-def atualizar(pergunta):
+def atualizar(pesquisa_id):
 
-    df = carregar_dados()
+    if "cliente_id" not in session:
+        return [], "", {}, {}, "", "", ""
+
+    cliente_id = session["cliente_id"]
+    options = lista_pesquisas(cliente_id)
+
+    if not pesquisa_id:
+        return options, "", {}, {}, "", "", ""
+
+    df = carregar_dados(pesquisa_id)
 
     if df.empty:
-        return "Sem dados", {}, "", []
+        return options, "Sem dados", {}, {}, "", "", ""
 
     total = len(df)
 
-    # =========================
-    # SEXO
-    # =========================
-    sexo = df["SEXO"].value_counts().reset_index()
-    sexo.columns = ["Sexo", "Qtd"]
-    sexo["%"] = round((sexo["Qtd"] / total) * 100, 1)
+    # ================= KPI
+    kpi = html.H3(f"Total: {total}")
 
-    # =========================
-    # IDADE
-    # =========================
-    idade = df["IDADE"].value_counts().reset_index()
-    idade.columns = ["Idade", "Qtd"]
-    idade["%"] = round((idade["Qtd"] / total) * 100, 1)
+    # ================= SEXO
+    sexo_df = df["sexo"].value_counts().reset_index()
+    sexo_df.columns = ["sexo", "qtd"]
 
-    kpis = html.Div([
+    fig_sexo = px.pie(sexo_df, names="sexo", values="qtd")
 
-        html.H2(f"Amostra Total: {total}"),
+    # ================= BAIRRO
+    bairro = df["localidade"].value_counts().reset_index()
+    bairro.columns = ["bairro", "qtd"]
 
-        html.Div([
-            html.H4("Sexo"),
-            html.Table([
-                html.Tr([html.Th("Sexo"), html.Th("Qtd"), html.Th("%")])
-            ] + [
-                html.Tr([
-                    html.Td(row["Sexo"]),
-                    html.Td(row["Qtd"]),
-                    html.Td(f'{row["%"]}%')
-                ]) for _, row in sexo.iterrows()
-            ])
-        ], style={"display": "inline-block", "margin": "20px"}),
+    fig_bairro = px.bar(bairro, x="bairro", y="qtd")
 
-        html.Div([
-            html.H4("Idade"),
-            html.Table([
-                html.Tr([html.Th("Idade"), html.Th("Qtd"), html.Th("%")])
-            ] + [
-                html.Tr([
-                    html.Td(row["Idade"]),
-                    html.Td(row["Qtd"]),
-                    html.Td(f'{row["%"]}%')
-                ]) for _, row in idade.iterrows()
-            ])
-        ], style={"display": "inline-block", "margin": "20px"})
+    # ================= IDADE
+    idade = df["idade"].value_counts()
 
-    ])
+    idade_html = [html.Div(f"{i}: {n}") for i, n in idade.items()]
 
-    # =========================
-    # FILTRO PERGUNTAS
-    # =========================
-    ignorar = [
-        "id", "submission_id", "pesquisa_id", "dados",
-        "SEXO", "IDADE", "LOCALIDADE", "ENTREVISTADOR",
-        "__id", "__system"
-    ]
+    # ================= ENTREVISTADOR
+    ent = df["entrevistador"].value_counts()
 
-    colunas = [c for c in df.columns if c not in ignorar]
-    opcoes = [{"label": c, "value": c} for c in colunas]
+    ent_html = [html.Div(f"{i}: {n}") for i, n in ent.items()]
 
-    if not pergunta:
-        pergunta = colunas[0]
+    # ================= PERGUNTAS DINÂMICAS (JSONB)
+    perguntas_html = []
 
-    # =========================
-    # GRÁFICO
-    # =========================
-    graf = df[pergunta].value_counts().reset_index()
-    graf.columns = ["categoria", "qtd"]
+    if "dados" in df.columns:
+        respostas = df["dados"].dropna()
 
-    graf["%"] = round((graf["qtd"] / graf["qtd"].sum()) * 100, 1)
+        all_keys = set()
 
-    fig = px.bar(
-        graf,
-        x="qtd",
-        y="categoria",
-        orientation="h",
-        text=graf["%"].astype(str) + "%"
+        for r in respostas:
+            all_keys.update(r.keys())
+
+        for key in all_keys:
+            vals = respostas.apply(lambda x: x.get(key) if key in x else None)
+            contagem = vals.value_counts()
+
+            df_plot = contagem.reset_index()
+            df_plot.columns = ["resposta", "qtd"]
+
+            fig = px.bar(df_plot, x="resposta", y="qtd", title=key)
+
+            perguntas_html.append(dcc.Graph(figure=fig))
+
+    return (
+        options,
+        kpi,
+        fig_sexo,
+        fig_bairro,
+        idade_html,
+        ent_html,
+        perguntas_html
     )
-
-    fig.update_traces(textposition="outside")
-
-    # =========================
-    # ENTREVISTADOR
-    # =========================
-    ent = df["ENTREVISTADOR"].value_counts().reset_index()
-    ent.columns = ["Entrevistador", "Quantidade"]
-
-    tabela = html.Table([
-        html.Tr([html.Th("Entrevistador"), html.Th("Qtd")])
-    ] + [
-        html.Tr([
-            html.Td(row["Entrevistador"]),
-            html.Td(row["Quantidade"])
-        ]) for _, row in ent.iterrows()
-    ])
-
-    return kpis, fig, tabela, opcoes
-
-# =========================
-# ETL ENDPOINT
-# =========================
-@app.server.route("/etl")
-def rodar_etl():
-    os.system("python etl.py")
-    return "ETL executado"
 
 # =========================
 # RUN
