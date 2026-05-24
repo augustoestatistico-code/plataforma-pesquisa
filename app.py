@@ -610,83 +610,89 @@ def atualizar(pesquisa_id):
             plot_bgcolor="#0f172a",
             font_color="white"
         )
+    # =========================
+    # QUESTÕES DINÂMICAS
+    # =========================
 
-  # =========================
-# QUESTÕES DINÂMICAS
-# =========================
+    questoes=[]
 
-questoes=[]
+    # CARREGA LABELS DA PESQUISA
+    labels_perguntas, tipos_perguntas, ordem_perguntas = carregar_labels(pesquisa_id)
 
-# CARREGA LABELS DA PESQUISA
-labels_perguntas, tipos_perguntas, ordem_perguntas = carregar_labels(pesquisa_id)
+    respostas=df["dados"].dropna()
 
-respostas=df["dados"].dropna()
-
-todas_chaves=set()
-
-for item in respostas:
-    if isinstance(item,dict):
-        todas_chaves.update(item.keys())
-
-# ORDEM E FILTRO DAS QUESTÕES
-chaves_validas = [
-    c for c in ordem_perguntas
-    if c in todas_chaves and limpar_chave(c)
-]
-
-for chave in chaves_validas:
-    valores = []
+    todas_chaves=set()
 
     for item in respostas:
-        if isinstance(item, dict):
-            valor = item.get(chave)
-            if valor not in [None, "", "nan"]:
-                valores.append(str(valor).strip())
+        if isinstance(item,dict):
+            todas_chaves.update(item.keys())
 
-    if not valores:
-        continue
+    chaves_validas = [
+        c for c in ordem_perguntas
+        if c in todas_chaves and limpar_chave(c)
+    ]
 
-    contagem = pd.Series(valores).value_counts().reset_index()
+    for chave in chaves_validas:
 
-    # pula perguntas abertas com respostas demais
-    if len(contagem) > 30:
-        continue
+        valores=[]
 
-    contagem.columns = ["Resposta", "Quantidade"]
-    contagem["Percentual"] = (
-        contagem["Quantidade"] / contagem["Quantidade"].sum() * 100
-    ).round(1)
+        for item in respostas:
 
-    contagem["Texto"] = (
-        contagem["Quantidade"].astype(str)
-        + " ("
-        + contagem["Percentual"].astype(str)
-        + "%)"
-    )
+            if isinstance(item,dict):
 
-    fig = px.bar(
-        contagem.sort_values("Quantidade", ascending=True),
-        x="Quantidade",
-        y="Resposta",
-        orientation="h",
-        text="Texto",
-        title=labels_perguntas.get(chave, chave)
-    )
+                valor=item.get(chave)
 
-    fig.update_layout(
-        paper_bgcolor="#111827",
-        plot_bgcolor="#111827",
-        font_color="white",
-        margin=dict(l=20, r=20, t=60, b=20)
-    )
+                if valor not in [None,"","nan"]:
+                    valores.append(str(valor).strip())
 
-    questoes.append(html.Div([
-        dcc.Graph(figure=fig),
-        gerar_tabela(contagem)
-    ], className="questao-card"))
+        if not valores:
+            continue
+
+        contagem=pd.Series(valores).value_counts().reset_index()
+
+        if len(contagem)>30:
+            continue
+
+        contagem.columns=["Resposta","Quantidade"]
+
+        contagem["Percentual"]=(
+            contagem["Quantidade"] /
+            contagem["Quantidade"].sum()*100
+        ).round(1)
+
+        contagem["Texto"]=(
+            contagem["Quantidade"].astype(str)
+            +" ("+
+            contagem["Percentual"].astype(str)
+            +"%)"
+        )
+
+        fig=px.bar(
+            contagem.sort_values("Quantidade",ascending=True),
+            x="Quantidade",
+            y="Resposta",
+            orientation="h",
+            text="Texto",
+            title=labels_perguntas.get(chave,chave)
+        )
+
+        fig.update_layout(
+            paper_bgcolor="#111827",
+            plot_bgcolor="#111827",
+            font_color="white"
+        )
+
+        questoes.append(
+            html.Div([
+                dcc.Graph(figure=fig),
+                gerar_tabela(contagem)
+            ],className="questao-card")
+        )
 
     if not questoes:
-        questoes = html.Div("Nenhuma questão dinâmica encontrada no campo dados.")
+        questoes = html.Div(
+            "Nenhuma questão encontrada"
+        )
 
     return (
         options,
@@ -700,7 +706,6 @@ for chave in chaves_validas:
         fig_mapa,
         questoes
     )
-
 # =========================
 # ETL ENDPOINT
 # =========================
