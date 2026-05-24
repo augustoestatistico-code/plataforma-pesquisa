@@ -490,7 +490,6 @@ def atualizar(pesquisa_id):
 
     cliente_id = session.get("cliente_id")
     cliente_nome = session.get("cliente_nome", "Cliente")
-    cliente_logo = session.get("cliente_logo")
 
     options = lista_pesquisas(cliente_id)
 
