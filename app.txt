@@ -32,7 +32,12 @@ def login():
             WHERE email = :email AND senha = :senha
         """)
 
-        user = engine.execute(query, {"email": email, "senha": senha}).fetchone()
+        with engine.connect() as conn:
+            result = conn.execute(query, {
+                "email": email,
+                "senha": senha
+            })
+            user = result.fetchone()
 
         if user:
             session["user_id"] = user[0]
