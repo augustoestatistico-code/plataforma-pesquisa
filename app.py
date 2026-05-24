@@ -509,33 +509,23 @@ def atualizar(pesquisa_id):
         return [], None, cliente_info, [card("Pesquisas", "0")], vazio, vazio, vazio, "", vazio, ""
 
 def carregar_labels(pesquisa_id):
-
-    df = pd.read_sql(
-        text("""
-        SELECT
-            name,
-            label,
-            type,
-            ordem
+    df = pd.read_sql(text("""
+        SELECT name, label, type, ordem
         FROM perguntas_pesquisa
-        WHERE pesquisa_id=:pesquisa_id
-        ORDER BY ordem
-        """),
-        engine,
-        params={"pesquisa_id":pesquisa_id}
-    )
+        WHERE pesquisa_id = :pesquisa_id
+        ORDER BY ordem NULLS LAST, id
+    """), engine, params={"pesquisa_id": int(pesquisa_id)})
 
-    labels={}
-    tipos={}
-    ordem=[]
+    labels = {}
+    tipos = {}
+    ordem = []
 
-    for _,row in df.iterrows():
-
+    for _, row in df.iterrows():
         labels[row["name"]] = row["label"]
         tipos[row["name"]] = row["type"]
         ordem.append(row["name"])
 
-    return labels,tipos,ordem
+    return labels, tipos, ordem
 
 
     df = carregar_dados(pesquisa_id)
