@@ -290,29 +290,7 @@ def inicializar_dashboard(pathname):
 
     valor_inicial = options[0]["value"] if options else None
 
-logo = cliente.get("logo")
-
-header = html.Div([
-    html.Img(
-        src=logo,
-        style={
-            "height": "45px",
-            "marginRight": "12px",
-            "borderRadius": "8px"
-        }
-    ) if logo else None,
-
-    html.Div([
-        html.Div(f"Cliente: {cliente['nome']}", style={"fontWeight": "bold"}),
-        html.Div("Dashboard de pesquisas em andamento", style={"fontSize": "12px", "color": "#94a3b8"})
-    ])
-], style={
-    "display": "flex",
-    "alignItems": "center",
-    "gap": "10px"
-})
-
-return options, valor_inicial, header
+    return options, valor_inicial, f"Cliente: {cliente['nome']}"
 
 
 # =========================
@@ -437,85 +415,84 @@ def atualizar_dashboard(pesquisa_id):
         },
         page_size=10
     )
+# =========================
+# PERGUNTAS DINÂMICAS JSONB
+# =========================
+perguntas = []
 
-    # =========================
-    # PERGUNTAS DINÂMICAS JSONB
-    # =========================
-    perguntas = []
+if "dados" in df.columns:
+    dados_normalizados = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_normalizados)
 
-    if "dados" in df.columns:
-        dados_normalizados = df["dados"].apply(normalizar_json)
-        json_df = pd.json_normalize(dados_normalizados)
+    colunas_ignorar_fixas = {
+        "meta.instanceID",
+        "instanceID",
+        "__system",
+        "_id",
+        "_uuid",
+        "_submission_time",
+        "nome",
+        "loc1",
+        "pesquisa_inicio",
+        "pesquisa_fim",
+        "hoje"
+    }
 
-colunas_ignorar_fixas = {
-    "meta.instanceID",
-    "instanceID",
-    "__system",
-    "_id",
-    "_uuid",
-    "_submission_time",
-    "nome",
-    "loc1",
-    "pesquisa_inicio",
-    "pesquisa_fim",
-    "hoje"
-}
+    for coluna in json_df.columns:
 
-for coluna in json_df.columns:
+        if coluna in colunas_ignorar_fixas:
+            continue
 
-    if coluna in colunas_ignorar_fixas:
-        continue
+        if coluna.startswith("_system."):
+            continue
 
-    if coluna.startswith("_system."):
-        continue
+        if coluna.startswith("_"):
+            continue
 
-    if coluna.startswith("_"):
-        continue
+        serie = json_df[coluna].dropna().astype(str).str.strip()
+        serie = serie[serie != ""]
 
-            serie = json_df[coluna].dropna().astype(str).str.strip()
-            serie = serie[serie != ""]
+        if serie.empty:
+            continue
 
-            if serie.empty:
-                continue
+        contagem = serie.value_counts().reset_index()
+        contagem.columns = ["Resposta", "Quantidade"]
+        contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
+        contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["%"].astype(str) + "%)"
 
-            contagem = serie.value_counts().reset_index()
-            contagem.columns = ["Resposta", "Quantidade"]
-            contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
-            contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["%"].astype(str) + "%)"
+        if len(contagem) > 15:
+            contagem = contagem.head(15)
 
-            if len(contagem) > 15:
-                contagem = contagem.head(15)
+        fig = px.bar(
+            contagem.sort_values("Quantidade", ascending=True),
+            x="Quantidade",
+            y="Resposta",
+            orientation="h",
+            text="Texto",
+            title=f"Pergunta: {coluna}"
+        )
+        fig = tema_fig(fig)
 
-            fig = px.bar(
-                contagem.sort_values("Quantidade", ascending=True),
-                x="Quantidade",
-                y="Resposta",
-                orientation="h",
-                text="Texto",
-                title=f"Pergunta: {coluna}"
-            )
-            fig = tema_fig(fig)
-
-            perguntas.append(
-                html.Div([
-                    dcc.Graph(figure=fig)
-                ], style={
-                    "background": "#111827",
-                    "borderRadius": "18px",
-                    "border": "1px solid #1f2937",
-                    "marginBottom": "18px",
-                    "padding": "10px"
-                })
-            )
-
-    if not perguntas:
-        perguntas = [
-            html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+        perguntas.append(
+            html.Div([
+                dcc.Graph(figure=fig)
+            ], style={
                 "background": "#111827",
-                "padding": "20px",
-                "borderRadius": "18px"
+                "borderRadius": "18px",
+                "border": "1px solid #1f2937",
+                "marginBottom": "18px",
+                "padding": "10px"
             })
-        ]
+        )
+
+if not perguntas:
+    perguntas = [
+        html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+            "background": "#111827",
+            "padding": "20px",
+            "borderRadius": "18px"
+        })
+    ]
 
     return kpis, fig_sexo, fig_idade, fig_localidade, tabela_ent, perguntas
 

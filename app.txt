@@ -415,73 +415,84 @@ def atualizar_dashboard(pesquisa_id):
         },
         page_size=10
     )
+# =========================
+# PERGUNTAS DINÂMICAS JSONB
+# =========================
+perguntas = []
 
-    # =========================
-    # PERGUNTAS DINÂMICAS JSONB
-    # =========================
-    perguntas = []
+if "dados" in df.columns:
+    dados_normalizados = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_normalizados)
 
-    if "dados" in df.columns:
-        dados_normalizados = df["dados"].apply(normalizar_json)
-        json_df = pd.json_normalize(dados_normalizados)
+    colunas_ignorar_fixas = {
+        "meta.instanceID",
+        "instanceID",
+        "__system",
+        "_id",
+        "_uuid",
+        "_submission_time",
+        "nome",
+        "loc1",
+        "pesquisa_inicio",
+        "pesquisa_fim",
+        "hoje"
+    }
 
-        colunas_ignorar = {
-            "meta.instanceID",
-            "instanceID",
-            "__system",
-            "_id",
-            "_uuid",
-            "_submission_time"
-        }
+    for coluna in json_df.columns:
 
-        for coluna in json_df.columns:
-            if coluna in colunas_ignorar:
-                continue
+        if coluna in colunas_ignorar_fixas:
+            continue
 
-            serie = json_df[coluna].dropna().astype(str).str.strip()
-            serie = serie[serie != ""]
+        if coluna.startswith("_system."):
+            continue
 
-            if serie.empty:
-                continue
+        if coluna.startswith("_"):
+            continue
 
-            contagem = serie.value_counts().reset_index()
-            contagem.columns = ["Resposta", "Quantidade"]
-            contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
-            contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["%"].astype(str) + "%)"
+        serie = json_df[coluna].dropna().astype(str).str.strip()
+        serie = serie[serie != ""]
 
-            if len(contagem) > 15:
-                contagem = contagem.head(15)
+        if serie.empty:
+            continue
 
-            fig = px.bar(
-                contagem.sort_values("Quantidade", ascending=True),
-                x="Quantidade",
-                y="Resposta",
-                orientation="h",
-                text="Texto",
-                title=f"Pergunta: {coluna}"
-            )
-            fig = tema_fig(fig)
+        contagem = serie.value_counts().reset_index()
+        contagem.columns = ["Resposta", "Quantidade"]
+        contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
+        contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["%"].astype(str) + "%)"
 
-            perguntas.append(
-                html.Div([
-                    dcc.Graph(figure=fig)
-                ], style={
-                    "background": "#111827",
-                    "borderRadius": "18px",
-                    "border": "1px solid #1f2937",
-                    "marginBottom": "18px",
-                    "padding": "10px"
-                })
-            )
+        if len(contagem) > 15:
+            contagem = contagem.head(15)
 
-    if not perguntas:
-        perguntas = [
-            html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+        fig = px.bar(
+            contagem.sort_values("Quantidade", ascending=True),
+            x="Quantidade",
+            y="Resposta",
+            orientation="h",
+            text="Texto",
+            title=f"Pergunta: {coluna}"
+        )
+        fig = tema_fig(fig)
+
+        perguntas.append(
+            html.Div([
+                dcc.Graph(figure=fig)
+            ], style={
                 "background": "#111827",
-                "padding": "20px",
-                "borderRadius": "18px"
+                "borderRadius": "18px",
+                "border": "1px solid #1f2937",
+                "marginBottom": "18px",
+                "padding": "10px"
             })
-        ]
+        )
+
+if not perguntas:
+    perguntas = [
+        html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+            "background": "#111827",
+            "padding": "20px",
+            "borderRadius": "18px"
+        })
+    ]
 
     return kpis, fig_sexo, fig_idade, fig_localidade, tabela_ent, perguntas
 

@@ -27,4 +27,4 @@ https://vivircgntzysutzfldeq.supabase.co/storage/v1/object/public/Logos/Seta_Pes
 
 https://vivircgntzysutzfldeq.supabase.co/storage/v1/object/public/Logos/Soberano_logo.png
 
-https://vivircgntzysutzfldeq.supabase.co/storage/v1/object/public/Logos/Soberano_logo.png
+https://vivircgntzysutzfldeq.supabase.co/storage/v1/object/public/Logos/Qualita_logo.png
