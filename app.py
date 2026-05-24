@@ -169,11 +169,6 @@ def carregar_dados(pesquisa_id):
 
     return df
 
-options=lista_pesquisas(cliente_id)
-
-print("CLIENTE:",cliente_id)
-print("PESQUISAS:",options)
-
 def tabela_freq(df, coluna):
     base = df[coluna].value_counts(dropna=False).reset_index()
     base.columns = [coluna, "Quantidade"]
