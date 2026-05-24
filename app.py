@@ -701,7 +701,6 @@ for chave in chaves_validas:
         questoes
     )
 
-
 # =========================
 # ETL ENDPOINT
 # =========================
