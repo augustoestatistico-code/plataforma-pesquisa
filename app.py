@@ -494,6 +494,13 @@ def atualizar(pesquisa_id):
 
     options = lista_pesquisas(cliente_id)
 
+    if options and pesquisa_id is None:
+        pesquisa_id = options[0]["value"]
+
+    print("CLIENTE:", cliente_id)
+    print("PESQUISAS:", options)
+    
+
     if not pesquisa_id and options:
         pesquisa_id = options[0]["value"]
 
