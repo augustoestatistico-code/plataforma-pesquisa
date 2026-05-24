@@ -290,7 +290,29 @@ def inicializar_dashboard(pathname):
 
     valor_inicial = options[0]["value"] if options else None
 
-    return options, valor_inicial, f"Cliente: {cliente['nome']}"
+logo = cliente.get("logo")
+
+header = html.Div([
+    html.Img(
+        src=logo,
+        style={
+            "height": "45px",
+            "marginRight": "12px",
+            "borderRadius": "8px"
+        }
+    ) if logo else None,
+
+    html.Div([
+        html.Div(f"Cliente: {cliente['nome']}", style={"fontWeight": "bold"}),
+        html.Div("Dashboard de pesquisas em andamento", style={"fontSize": "12px", "color": "#94a3b8"})
+    ])
+], style={
+    "display": "flex",
+    "alignItems": "center",
+    "gap": "10px"
+})
+
+return options, valor_inicial, header
 
 
 # =========================
@@ -425,18 +447,30 @@ def atualizar_dashboard(pesquisa_id):
         dados_normalizados = df["dados"].apply(normalizar_json)
         json_df = pd.json_normalize(dados_normalizados)
 
-        colunas_ignorar = {
-            "meta.instanceID",
-            "instanceID",
-            "__system",
-            "_id",
-            "_uuid",
-            "_submission_time"
-        }
+colunas_ignorar_fixas = {
+    "meta.instanceID",
+    "instanceID",
+    "__system",
+    "_id",
+    "_uuid",
+    "_submission_time",
+    "nome",
+    "loc1",
+    "pesquisa_inicio",
+    "pesquisa_fim",
+    "hoje"
+}
 
-        for coluna in json_df.columns:
-            if coluna in colunas_ignorar:
-                continue
+for coluna in json_df.columns:
+
+    if coluna in colunas_ignorar_fixas:
+        continue
+
+    if coluna.startswith("_system."):
+        continue
+
+    if coluna.startswith("_"):
+        continue
 
             serie = json_df[coluna].dropna().astype(str).str.strip()
             serie = serie[serie != ""]
