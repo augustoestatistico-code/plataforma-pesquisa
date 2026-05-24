@@ -488,55 +488,26 @@ def atualizar(pesquisa_id):
 
     options = lista_pesquisas(cliente_id)
 
-    if options and pesquisa_id is None:
-        pesquisa_id = options[0]["value"]
-
-    print("CLIENTE:", cliente_id)
-    print("PESQUISAS:", options)
-    
-
-    if not pesquisa_id and options:
-        pesquisa_id = options[0]["value"]
+    vazio = px.scatter(title="Sem dados")
 
     cliente_info = html.Div([
         html.Div(cliente_nome),
         html.Small(f"Cliente ID: {cliente_id}")
     ])
 
-    vazio = px.scatter(title="Sem dados")
-
     if not options:
         return [], None, cliente_info, [card("Pesquisas", "0")], vazio, vazio, vazio, "", vazio, ""
 
-def carregar_labels(pesquisa_id):
-    df = pd.read_sql(text("""
-        SELECT name, label, type, ordem
-        FROM perguntas_pesquisa
-        WHERE pesquisa_id = :pesquisa_id
-        ORDER BY ordem NULLS LAST, id
-    """), engine, params={"pesquisa_id": int(pesquisa_id)})
-
-    labels = {}
-    tipos = {}
-    ordem = []
-
-    for _, row in df.iterrows():
-        labels[row["name"]] = row["label"]
-        tipos[row["name"]] = row["type"]
-        ordem.append(row["name"])
-
-    return labels, tipos, ordem
-
+    # escolhe pesquisa com dados, se nenhuma estiver selecionada
+    if not pesquisa_id:
+        pesquisa_id = 1
 
     df = carregar_dados(pesquisa_id)
 
     if df.empty:
-        return options, pesquisa_id, cliente_info, [card("Total da Amostra", "0")], vazio, vazio, vazio, "", vazio, ""
+        return options, pesquisa_id, cliente_info, [card("Total da Amostra", "0")], vazio, vazio, vazio, "", vazio, "Sem dados nesta pesquisa"
 
     total = len(df)
-
-    qtd_localidades = df["localidade"].nunique()
-    qtd_entrevistadores = df["entrevistador"].nunique()
 
     sexo_tab = tabela_freq(df, "sexo")
     idade_tab = tabela_freq(df, "idade")
@@ -544,61 +515,32 @@ def carregar_labels(pesquisa_id):
     ent_tab = tabela_freq(df, "entrevistador")
 
     kpis = [
-        card("Total da Amostra", f"{total:,}".replace(",", ".")),
-        card("Localidades", qtd_localidades),
-        card("Entrevistadores", qtd_entrevistadores),
+        card("Total da Amostra", total),
+        card("Localidades", df["localidade"].nunique()),
+        card("Entrevistadores", df["entrevistador"].nunique()),
         card("Pesquisa ID", pesquisa_id),
     ]
 
-    fig_sexo = px.pie(
-        sexo_tab,
-        names="sexo",
-        values="Quantidade",
-        title="Distribuição por Sexo",
-        hole=0.45
-    )
-
-    fig_idade = px.bar(
-        idade_tab,
-        x="idade",
-        y="Quantidade",
-        text="Percentual",
-        title="Distribuição por Faixa Etária"
-    )
-
-    fig_local = px.bar(
-        local_tab.sort_values("Quantidade", ascending=True),
-        x="Quantidade",
-        y="localidade",
-        orientation="h",
-        text="Percentual",
-        title="Quantidade e Percentual por Localidade"
-    )
+    fig_sexo = px.pie(sexo_tab, names="sexo", values="Quantidade", title="Distribuição por Sexo", hole=0.45)
+    fig_idade = px.bar(idade_tab, x="idade", y="Quantidade", text="Percentual", title="Distribuição por Faixa Etária")
+    fig_local = px.bar(local_tab.sort_values("Quantidade"), x="Quantidade", y="localidade", orientation="h", text="Percentual", title="Quantidade e Percentual por Localidade")
 
     for fig in [fig_sexo, fig_idade, fig_local]:
-        fig.update_layout(
-            paper_bgcolor="#0f172a",
-            plot_bgcolor="#0f172a",
-            font_color="white",
-            margin=dict(l=20, r=20, t=60, b=20)
-        )
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font_color="white")
 
     tabelas = html.Div([
-        html.H4("Sexo"),
-        gerar_tabela(sexo_tab),
-
-        html.Br(),
-        html.H4("Faixa Etária"),
-        gerar_tabela(idade_tab),
-
-        html.Br(),
-        html.H4("Localidade"),
-        gerar_tabela(local_tab),
-
-        html.Br(),
-        html.H4("Entrevistador"),
-        gerar_tabela(ent_tab),
+        html.H4("Sexo"), gerar_tabela(sexo_tab),
+        html.Br(), html.H4("Faixa Etária"), gerar_tabela(idade_tab),
+        html.Br(), html.H4("Localidade"), gerar_tabela(local_tab),
+        html.Br(), html.H4("Entrevistador"), gerar_tabela(ent_tab),
     ])
+
+    fig_mapa = px.scatter(title="Sem GPS disponível nesta pesquisa")
+    fig_mapa.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font_color="white")
+
+    questoes = html.Div("Perguntas carregadas na próxima etapa.")
+
+    return options, pesquisa_id, cliente_info, kpis, fig_sexo, fig_idade, fig_local, tabelas, fig_mapa, questoes
 
     # =========================
     # MAPA GPS
