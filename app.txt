@@ -139,8 +139,11 @@ def lista_pesquisas(cliente_id):
 
 
 def carregar_dados(pesquisa_id):
-    df = pd.read_sql(text("""
-        SELECT 
+
+    print("PESQUISA RECEBIDA:", pesquisa_id)
+
+    query = text("""
+        SELECT
             pesquisa_id,
             sexo,
             idade,
@@ -148,20 +151,23 @@ def carregar_dados(pesquisa_id):
             entrevistador,
             dados
         FROM entrevistas
-        WHERE pesquisa_id = :pesquisa_id
-    """), engine, params={"pesquisa_id": pesquisa_id})
+        WHERE pesquisa_id=:pesquisa_id
+    """)
 
-    if df.empty:
-        return df
+    df = pd.read_sql(
+        query,
+        engine,
+        params={
+            "pesquisa_id": int(pesquisa_id)
+        }
+    )
 
-    for col in ["sexo", "idade", "localidade", "entrevistador"]:
-        df[col] = df[col].fillna("Não informado").astype(str).str.strip()
+    print("TOTAL LINHAS:",len(df))
 
-    df["sexo"] = df["sexo"].str.title()
-    df["localidade"] = df["localidade"].str.upper()
+    if not df.empty:
+        print(df.head())
 
     return df
-
 
 def tabela_freq(df, coluna):
     base = df[coluna].value_counts(dropna=False).reset_index()
@@ -479,9 +485,15 @@ def atualizar(pesquisa_id):
 
     cliente_id = session.get("cliente_id")
     cliente_nome = session.get("cliente_nome", "Cliente")
-    cliente_logo = session.get("cliente_logo")
 
     options = lista_pesquisas(cliente_id)
+
+    if options and pesquisa_id is None:
+        pesquisa_id = options[0]["value"]
+
+    print("CLIENTE:", cliente_id)
+    print("PESQUISAS:", options)
+    
 
     if not pesquisa_id and options:
         pesquisa_id = options[0]["value"]
@@ -599,58 +611,79 @@ def atualizar(pesquisa_id):
             font_color="white"
         )
 
-    # =========================
-    # QUESTÕES DINÂMICAS
-    # =========================
-    questoes = []
+  # =========================
+# QUESTÕES DINÂMICAS
+# =========================
 
-    respostas = df["dados"].dropna()
+questoes=[]
 
-    todas_chaves = set()
+# CARREGA LABELS DA PESQUISA
+labels_perguntas, tipos_perguntas, ordem_perguntas = carregar_labels(pesquisa_id)
+
+respostas=df["dados"].dropna()
+
+todas_chaves=set()
+
+for item in respostas:
+    if isinstance(item,dict):
+        todas_chaves.update(item.keys())
+
+# ORDEM E FILTRO DAS QUESTÕES
+chaves_validas = [
+    c for c in ordem_perguntas
+    if c in todas_chaves and limpar_chave(c)
+]
+
+for chave in chaves_validas:
+    valores = []
 
     for item in respostas:
         if isinstance(item, dict):
-            todas_chaves.update(item.keys())
+            valor = item.get(chave)
+            if valor not in [None, "", "nan"]:
+                valores.append(str(valor).strip())
 
-    chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)]
+    if not valores:
+        continue
 
-    for chave in chaves_validas:
-        valores = []
+    contagem = pd.Series(valores).value_counts().reset_index()
 
-        for item in respostas:
-            if isinstance(item, dict):
-                valor = item.get(chave)
-                if valor not in [None, "", "nan"]:
-                    valores.append(str(valor).strip())
+    # pula perguntas abertas com respostas demais
+    if len(contagem) > 30:
+        continue
 
-        if not valores:
-            continue
+    contagem.columns = ["Resposta", "Quantidade"]
+    contagem["Percentual"] = (
+        contagem["Quantidade"] / contagem["Quantidade"].sum() * 100
+    ).round(1)
 
-        contagem = pd.Series(valores).value_counts().reset_index()
-        contagem.columns = ["Resposta", "Quantidade"]
-        contagem["Percentual"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
-        contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["Percentual"].astype(str) + "%)"
+    contagem["Texto"] = (
+        contagem["Quantidade"].astype(str)
+        + " ("
+        + contagem["Percentual"].astype(str)
+        + "%)"
+    )
 
-        fig = px.bar(
-            contagem.sort_values("Quantidade", ascending=True),
-            x="Quantidade",
-            y="Resposta",
-            orientation="h",
-            text="Texto",
-            title=str(chave)
-        )
+    fig = px.bar(
+        contagem.sort_values("Quantidade", ascending=True),
+        x="Quantidade",
+        y="Resposta",
+        orientation="h",
+        text="Texto",
+        title=labels_perguntas.get(chave, chave)
+    )
 
-        fig.update_layout(
-            paper_bgcolor="#111827",
-            plot_bgcolor="#111827",
-            font_color="white",
-            margin=dict(l=20, r=20, t=60, b=20)
-        )
+    fig.update_layout(
+        paper_bgcolor="#111827",
+        plot_bgcolor="#111827",
+        font_color="white",
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
 
-        questoes.append(html.Div([
-            dcc.Graph(figure=fig),
-            gerar_tabela(contagem)
-        ], className="questao-card"))
+    questoes.append(html.Div([
+        dcc.Graph(figure=fig),
+        gerar_tabela(contagem)
+    ], className="questao-card"))
 
     if not questoes:
         questoes = html.Div("Nenhuma questão dinâmica encontrada no campo dados.")

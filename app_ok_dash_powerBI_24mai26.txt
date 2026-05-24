@@ -611,28 +611,20 @@ def atualizar(pesquisa_id):
             font_color="white"
         )
 
-  # =========================
-# QUESTÕES DINÂMICAS
-# =========================
+    # =========================
+    # QUESTÕES DINÂMICAS
+    # =========================
+    questoes = []
 
-questoes=[]
+    respostas = df["dados"].dropna()
 
-# CARREGA LABELS DA PESQUISA
-labels_perguntas, tipos_perguntas, ordem_perguntas = carregar_labels(pesquisa_id)
+    todas_chaves = set()
 
-respostas=df["dados"].dropna()
+    for item in respostas:
+        if isinstance(item, dict):
+            todas_chaves.update(item.keys())
 
-todas_chaves=set()
-
-for item in respostas:
-    if isinstance(item,dict):
-        todas_chaves.update(item.keys())
-
-# ORDEM E FILTRO DAS QUESTÕES
-chaves_validas = [
-    c for c in ordem_perguntas
-    if c in todas_chaves and limpar_chave(c)
-]
+chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)][:12]
 
 for chave in chaves_validas:
     valores = []
@@ -670,7 +662,7 @@ for chave in chaves_validas:
         y="Resposta",
         orientation="h",
         text="Texto",
-        title=labels_perguntas.get(chave, chave)
+        title=str(chave)
     )
 
     fig.update_layout(
