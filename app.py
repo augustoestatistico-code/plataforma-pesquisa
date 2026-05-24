@@ -624,7 +624,7 @@ def atualizar(pesquisa_id):
         if isinstance(item, dict):
             todas_chaves.update(item.keys())
 
-    chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)]
+    chaves_validas = [c for c in sorted(todas_chaves) if limpar_chave(c)][:12]
 
     for chave in chaves_validas:
         valores = []
@@ -638,7 +638,11 @@ def atualizar(pesquisa_id):
         if not valores:
             continue
 
-        contagem = pd.Series(valores).value_counts().reset_index()
+    contagem = pd.Series(valores).value_counts().reset_index()
+
+    if len(contagem) > 30:
+        continue
+
         contagem.columns = ["Resposta", "Quantidade"]
         contagem["Percentual"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
         contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["Percentual"].astype(str) + "%)"
