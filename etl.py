@@ -258,4 +258,4 @@ for _,pesquisa in pesquisas.iterrows():
             str(e)
         )
 
-print("\nETL FINALIZADO")
+print("\nETL FINALIZADO E ATUALIZADO")
