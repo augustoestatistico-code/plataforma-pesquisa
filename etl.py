@@ -5,86 +5,162 @@ from requests.auth import HTTPBasicAuth
 from sqlalchemy import create_engine, text
 import os
 
-# ===== CONFIG =====
+# ======================
+# CONFIG
+# ======================
 
-ODK_URL="https://app.ar7pesquisas.com.br"
-ODK_USER="augusto.estatistico@gmail.com"
-ODK_PASS="@Mat050dois"
+ODK_URL = "https://app.ar7pesquisas.com.br"
+ODK_USER = "augusto.estatistico@gmail.com"
+ODK_PASS = "@Mat050dois"
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 
-# ===== BUSCAR PESQUISA =====
-pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine).iloc[0]
+# ======================
+# BUSCAR TODAS PESQUISAS
+# ======================
 
-url = f"{ODK_URL}/v1/projects/{pesquisa['projeto_odk']}/forms/{pesquisa['form_id']}.svc/Submissions"
+pesquisas = pd.read_sql("""
+SELECT
+    id,
+    nome,
+    projeto_odk,
+    form_id
+FROM pesquisas
+ORDER BY id
+""", engine)
 
-r = requests.get(url, auth=HTTPBasicAuth(ODK_USER, ODK_PASS))
-data = r.json().get('value', [])
+print("PESQUISAS ENCONTRADAS:")
+print(pesquisas[["id","nome"]])
 
-df = pd.DataFrame(data)
-print(df.columns)
+# ======================
+# LOOP EM TODAS
+# ======================
 
-print("TOTAL:", len(df))
+for _, pesquisa in pesquisas.iterrows():
 
-# ===== INSERIR =====
-for _, row in df.iterrows():
+    try:
 
-    dados = row.where(pd.notnull(row), None).to_dict()
+        print(f"\nPROCESSANDO: {pesquisa['nome']}")
 
-    sexo = dados.get("SEXO")
-    idade = dados.get("IDADE")
-    localidade = dados.get("LOCALIDADE")
-    entrevistador = dados.get("ENTREVISTADOR")
+        url = (
+            f"{ODK_URL}/v1/projects/"
+            f"{pesquisa['projeto_odk']}"
+            f"/forms/"
+            f"{pesquisa['form_id']}.svc/Submissions"
+        )
 
-with engine.begin() as conn:
+        r = requests.get(
+            url,
+            auth=HTTPBasicAuth(
+                ODK_USER,
+                ODK_PASS
+            )
+        )
 
-    for _, row in df.iterrows():
+        if r.status_code != 200:
 
-        dados = row.where(pd.notnull(row), None).to_dict()
+            print(
+                f"ERRO API {r.status_code}"
+            )
 
-        sexo = dados.get("SEXO")
-        idade = dados.get("IDADE")
-        localidade = dados.get("LOCALIDADE")
+            continue
 
-        entrevistador = dados.get("ENTREVISTADOR")  # vamos ajustar depois se precisar
+        data = r.json().get(
+            "value",
+            []
+        )
 
-        try:
-            conn.execute(text("""
-                INSERT INTO entrevistas (
-                    submission_id,
-                    pesquisa_id,
-                    sexo,
-                    idade,
-                    localidade,
-                    entrevistador,
-                    dados
+        df = pd.DataFrame(data)
+
+        print(
+            "TOTAL:",
+            len(df)
+        )
+
+        if df.empty:
+            continue
+
+        with engine.begin() as conn:
+
+            for _, row in df.iterrows():
+
+                dados = (
+                    row.where(
+                        pd.notnull(row),
+                        None
+                    )
+                    .to_dict()
                 )
-                VALUES (
-                    :submission_id,
-                    :pesquisa_id,
-                    :sexo,
-                    :idade,
-                    :localidade,
-                    :entrevistador,
-                    :dados
+
+                sexo = dados.get("SEXO")
+                idade = dados.get("IDADE")
+                localidade = dados.get("LOCALIDADE")
+                entrevistador = dados.get("ENTREVISTADOR")
+
+                conn.execute(
+                    text("""
+                    INSERT INTO entrevistas(
+                        submission_id,
+                        pesquisa_id,
+                        sexo,
+                        idade,
+                        localidade,
+                        entrevistador,
+                        dados
+                    )
+                    VALUES(
+                        :submission_id,
+                        :pesquisa_id,
+                        :sexo,
+                        :idade,
+                        :localidade,
+                        :entrevistador,
+                        :dados
+                    )
+                    ON CONFLICT
+                    (submission_id)
+                    DO NOTHING
+                    """),
+                    {
+                        "submission_id":
+                        dados.get("__id"),
+
+                        "pesquisa_id":
+                        int(
+                            pesquisa["id"]
+                        ),
+
+                        "sexo":
+                        sexo,
+
+                        "idade":
+                        idade,
+
+                        "localidade":
+                        localidade,
+
+                        "entrevistador":
+                        entrevistador,
+
+                        "dados":
+                        json.dumps(
+                            dados,
+                            ensure_ascii=False
+                        )
+                    }
                 )
-                ON CONFLICT (submission_id) DO NOTHING
-            """), {
-                "submission_id": dados.get("__id"),
-                "pesquisa_id": int(pesquisa['id']),
-                "sexo": sexo,
-                "idade": idade,
-                "localidade": localidade,
-                "entrevistador": entrevistador,
-                "dados": json.dumps(dados, ensure_ascii=False)
-            })
 
-        except Exception as e:
-            print("ERRO AO INSERIR:", e)
+        print(
+            f"OK: {pesquisa['nome']}"
+        )
 
+    except Exception as e:
 
-print("✅ ETL OK")
-print(df.columns)
-exit()
+        print(
+            f"ERRO {pesquisa['nome']}:",
+            e
+        )
+
+print("\nETL FINALIZADO")
