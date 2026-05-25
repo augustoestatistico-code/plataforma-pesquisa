@@ -65,15 +65,18 @@ def login():
     </body>
     """
 
+
 @server.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
 
+
 @server.before_request
 def proteger_dashboard():
     if request.path.startswith("/dashboard") and "cliente_id" not in session:
         return redirect("/")
+
 
 # =========================
 # DASH
@@ -94,11 +97,13 @@ def get_cliente(cliente_id):
         FROM clientes
         WHERE id = :cliente_id
     """)
+
     with engine.connect() as conn:
         row = conn.execute(query, {"cliente_id": cliente_id}).fetchone()
 
     if row:
         return {"nome": row[0], "logo": row[1]}
+
     return {"nome": "Cliente", "logo": None}
 
 
@@ -179,6 +184,93 @@ def tema_fig(fig):
     fig.update_xaxes(gridcolor="#1f2937")
     fig.update_yaxes(gridcolor="#1f2937")
     return fig
+
+
+def pergunta_deve_ignorar(coluna):
+    colunas_ignorar_fixas = {
+        "meta.instanceID",
+        "instanceID",
+        "__system",
+        "_id",
+        "_uuid",
+        "_submission_time",
+        "nome",
+        "loc1",
+        "pesquisa_inicio",
+        "pesquisa_fim",
+        "hoje"
+    }
+
+    if coluna in colunas_ignorar_fixas:
+        return True
+
+    if coluna.startswith("_system."):
+        return True
+
+    if coluna.startswith("_"):
+        return True
+
+    return False
+
+
+def gerar_graficos_perguntas(df):
+    perguntas = []
+
+    if "dados" not in df.columns:
+        return perguntas
+
+    dados_normalizados = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_normalizados)
+
+    if json_df.empty:
+        return perguntas
+
+    for coluna in json_df.columns:
+        if pergunta_deve_ignorar(coluna):
+            continue
+
+        serie = json_df[coluna].dropna().astype(str).str.strip()
+        serie = serie[serie != ""]
+
+        if serie.empty:
+            continue
+
+        contagem = serie.value_counts().reset_index()
+        contagem.columns = ["Resposta", "Quantidade"]
+        contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
+        contagem["Texto"] = (
+            contagem["Quantidade"].astype(str)
+            + " ("
+            + contagem["%"].astype(str)
+            + "%)"
+        )
+
+        if len(contagem) > 15:
+            contagem = contagem.head(15)
+
+        fig = px.bar(
+            contagem.sort_values("Quantidade", ascending=True),
+            x="Quantidade",
+            y="Resposta",
+            orientation="h",
+            text="Texto",
+            title=f"Pergunta: {coluna}"
+        )
+        fig = tema_fig(fig)
+
+        perguntas.append(
+            html.Div([
+                dcc.Graph(figure=fig)
+            ], style={
+                "background": "#111827",
+                "borderRadius": "18px",
+                "border": "1px solid #1f2937",
+                "marginBottom": "18px",
+                "padding": "10px"
+            })
+        )
+
+    return perguntas
 
 
 # =========================
@@ -287,10 +379,35 @@ def inicializar_dashboard(pathname):
 
     cliente = get_cliente(cliente_id)
     options = lista_pesquisas(cliente_id)
-
     valor_inicial = options[0]["value"] if options else None
 
-    return options, valor_inicial, f"Cliente: {cliente['nome']}"
+    logo = cliente.get("logo")
+    header = html.Div([
+        html.Img(
+            src=logo,
+            style={
+                "height": "45px",
+                "marginRight": "12px",
+                "borderRadius": "8px",
+                "objectFit": "contain",
+                "background": "white"
+            }
+        ) if logo else None,
+
+        html.Div([
+            html.Div(f"Cliente: {cliente['nome']}", style={"fontWeight": "bold"}),
+            html.Div(
+                "Dashboard de pesquisas em andamento",
+                style={"fontSize": "12px", "color": "#94a3b8"}
+            )
+        ])
+    ], style={
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "10px"
+    })
+
+    return options, valor_inicial, header
 
 
 # =========================
@@ -379,7 +496,12 @@ def atualizar_dashboard(pesquisa_id):
     loc_df = df["localidade"].value_counts().reset_index()
     loc_df.columns = ["Localidade", "Quantidade"]
     loc_df["%"] = (loc_df["Quantidade"] / total * 100).round(1)
-    loc_df["Texto"] = loc_df["Quantidade"].astype(str) + " (" + loc_df["%"].astype(str) + "%)"
+    loc_df["Texto"] = (
+        loc_df["Quantidade"].astype(str)
+        + " ("
+        + loc_df["%"].astype(str)
+        + "%)"
+    )
     loc_df = loc_df.sort_values("Quantidade", ascending=True)
 
     fig_localidade = px.bar(
@@ -415,85 +537,16 @@ def atualizar_dashboard(pesquisa_id):
         },
         page_size=10
     )
-# =========================
-# PERGUNTAS DINÂMICAS JSONB
-# =========================
-perguntas = []
 
-if "dados" in df.columns:
-    dados_normalizados = df["dados"].apply(normalizar_json)
-    json_df = pd.json_normalize(dados_normalizados)
+    perguntas = gerar_graficos_perguntas(df)
 
-    colunas_ignorar_fixas = {
-        "meta.instanceID",
-        "instanceID",
-        "__system",
-        "_id",
-        "_uuid",
-        "_submission_time",
-        "nome",
-        "loc1",
-        "pesquisa_inicio",
-        "pesquisa_fim",
-        "hoje"
-    }
-
-    for coluna in json_df.columns:
-
-        if coluna in colunas_ignorar_fixas:
-            continue
-
-        if coluna.startswith("_system."):
-            continue
-
-        if coluna.startswith("_"):
-            continue
-
-        serie = json_df[coluna].dropna().astype(str).str.strip()
-        serie = serie[serie != ""]
-
-        if serie.empty:
-            continue
-
-        contagem = serie.value_counts().reset_index()
-        contagem.columns = ["Resposta", "Quantidade"]
-        contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
-        contagem["Texto"] = contagem["Quantidade"].astype(str) + " (" + contagem["%"].astype(str) + "%)"
-
-        if len(contagem) > 15:
-            contagem = contagem.head(15)
-
-        fig = px.bar(
-            contagem.sort_values("Quantidade", ascending=True),
-            x="Quantidade",
-            y="Resposta",
-            orientation="h",
-            text="Texto",
-            title=f"Pergunta: {coluna}"
-        )
-        fig = tema_fig(fig)
-
-        perguntas.append(
-            html.Div([
-                dcc.Graph(figure=fig)
-            ], style={
-                "background": "#111827",
-                "borderRadius": "18px",
-                "border": "1px solid #1f2937",
-                "marginBottom": "18px",
-                "padding": "10px"
-            })
-        )
     if not perguntas:
         perguntas = [
-            html.Div(
-                "Nenhuma pergunta encontrada no campo dados JSONB.",
-                style={
-                    "background":"#111827",
-                    "padding":"20px",
-                    "borderRadius":"18px"
-                }
-            )
+            html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+                "background": "#111827",
+                "padding": "20px",
+                "borderRadius": "18px"
+            })
         ]
 
     return (
@@ -504,6 +557,8 @@ if "dados" in df.columns:
         tabela_ent,
         perguntas
     )
+
+
 # =========================
 # ETL ENDPOINT
 # =========================
