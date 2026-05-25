@@ -2,58 +2,260 @@ import requests
 import pandas as pd
 import json
 from requests.auth import HTTPBasicAuth
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import os
 
-# ===== CONFIG =====
+# ======================
+# CONFIG
+# ======================
 
-ODK_URL="https://app.ar7pesquisas.com.br"
-ODK_USER="augusto.estatistico@gmail.com"
-ODK_PASS="@Mat050dois"
+ODK_URL = "https://app.ar7pesquisas.com.br"
+ODK_USER = "augusto.estatistico@gmail.com"
+ODK_PASS = "@Mat050dois"
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 
-# ===== BUSCAR PESQUISA =====
-pesquisa = pd.read_sql("SELECT * FROM pesquisas LIMIT 1", engine).iloc[0]
+# ======================
+# BUSCAR TODAS PÁGINAS ODK
+# ======================
 
-url = f"{ODK_URL}/v1/projects/{pesquisa['projeto_odk']}/forms/{pesquisa['form_id']}.svc/Submissions"
+def buscar_todas_submissoes(url):
 
-r = requests.get(url, auth=HTTPBasicAuth(ODK_USER, ODK_PASS))
-data = r.json().get('value', [])
+    todos=[]
 
-df = pd.DataFrame(data)
+    while url:
 
-print("TOTAL:", len(df))
+        print("BUSCANDO:",url)
 
-# ===== INSERIR =====
-for _, row in df.iterrows():
-
-    dados = row.where(pd.notnull(row), None).to_dict()
-
-    sexo = dados.get("SEXO")
-    idade = dados.get("IDADE")
-    localidade = dados.get("LOCALIDADE")
-
-   with engine.begin() as conn:
-    conn.execute("""
-        INSERT INTO entrevistas (
-            submission_id, pesquisa_id, sexo, idade, localidade, dados
+        r=requests.get(
+            url,
+            auth=HTTPBasicAuth(
+                ODK_USER,
+                ODK_PASS
+            )
         )
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (submission_id) DO NOTHING
-    """, (
-        dados.get("__id"),
-        pesquisa['id'],
-        sexo,
-        idade,
-        localidade,
-        json.dumps(dados, ensure_ascii=False)
-    ))
+
+        if r.status_code!=200:
+
+            print(
+                "ERRO API:",
+                r.status_code
+            )
+
+            print(
+                r.text[:500]
+            )
+
+            return []
+
+        js=r.json()
+
+        pagina=js.get(
+            "value",
+            []
+        )
+
+        todos.extend(
+            pagina
+        )
+
+        url=js.get(
+            "@odata.nextLink"
+        )
+
+    return todos
 
 
+# ======================
+# BUSCAR PESQUISAS
+# ======================
 
-print("✅ ETL OK")
-print(df.columns)
-exit()
+pesquisas=pd.read_sql("""
+
+SELECT
+    id,
+    nome,
+    projeto_odk,
+    form_id
+
+FROM pesquisas
+
+ORDER BY id
+
+""",engine)
+
+print("\nPESQUISAS ENCONTRADAS:")
+print(
+    pesquisas[
+        ["id","nome"]
+    ]
+)
+
+# ======================
+# LOOP
+# ======================
+
+for _,pesquisa in pesquisas.iterrows():
+
+    try:
+
+        print(
+            "\n================="
+        )
+
+        print(
+            "PROCESSANDO:",
+            pesquisa["nome"]
+        )
+
+        url=(
+
+            f"{ODK_URL}/v1/projects/"
+            f"{pesquisa['projeto_odk']}"
+            f"/forms/"
+            f"{pesquisa['form_id']}"
+            ".svc/Submissions"
+
+        )
+
+        data=buscar_todas_submissoes(
+            url
+        )
+
+        print(
+            "TOTAL ODK:",
+            len(data)
+        )
+
+        if len(data)==0:
+
+            continue
+
+        df=pd.DataFrame(data)
+
+        with engine.begin() as conn:
+
+            for _,row in df.iterrows():
+
+                dados=(
+
+                    row.where(
+                        pd.notnull(row),
+                        None
+                    )
+
+                    .to_dict()
+
+                )
+
+                sexo=dados.get(
+                    "SEXO"
+                )
+
+                idade=dados.get(
+                    "IDADE"
+                )
+
+                localidade=dados.get(
+                    "LOCALIDADE"
+                )
+
+                entrevistador=dados.get(
+                    "ENTREVISTADOR"
+                )
+
+                conn.execute(
+
+                    text("""
+
+                    INSERT INTO entrevistas(
+
+                        submission_id,
+                        pesquisa_id,
+                        sexo,
+                        idade,
+                        localidade,
+                        entrevistador,
+                        dados
+
+                    )
+
+                    VALUES(
+
+                        :submission_id,
+                        :pesquisa_id,
+                        :sexo,
+                        :idade,
+                        :localidade,
+                        :entrevistador,
+                        :dados
+
+                    )
+
+                    ON CONFLICT
+                    (submission_id)
+
+                    DO NOTHING
+
+                    """),
+
+                    {
+
+                        "submission_id":
+
+                        dados.get(
+                            "__id"
+                        ),
+
+                        "pesquisa_id":
+
+                        int(
+                            pesquisa["id"]
+                        ),
+
+                        "sexo":
+
+                        sexo,
+
+                        "idade":
+
+                        idade,
+
+                        "localidade":
+
+                        localidade,
+
+                        "entrevistador":
+
+                        entrevistador,
+
+                        "dados":
+
+                        json.dumps(
+                            dados,
+                            ensure_ascii=False
+                        )
+
+                    }
+
+                )
+
+        print(
+            "OK:",
+            pesquisa["nome"]
+        )
+
+    except Exception as e:
+
+        print(
+            "ERRO:",
+            pesquisa["nome"]
+        )
+
+        print(
+            str(e)
+        )
+
+print("\nETL FINALIZADO")
