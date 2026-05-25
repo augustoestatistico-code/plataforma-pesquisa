@@ -484,19 +484,26 @@ if "dados" in df.columns:
                 "padding": "10px"
             })
         )
+    if not perguntas:
+        perguntas = [
+            html.Div(
+                "Nenhuma pergunta encontrada no campo dados JSONB.",
+                style={
+                    "background":"#111827",
+                    "padding":"20px",
+                    "borderRadius":"18px"
+                }
+            )
+        ]
 
-if not perguntas:
-    perguntas = [
-        html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
-            "background": "#111827",
-            "padding": "20px",
-            "borderRadius": "18px"
-        })
-    ]
-
-    return kpis, fig_sexo, fig_idade, fig_localidade, tabela_ent, perguntas
-
-
+    return (
+        kpis,
+        fig_sexo,
+        fig_idade,
+        fig_localidade,
+        tabela_ent,
+        perguntas
+    )
 # =========================
 # ETL ENDPOINT
 # =========================
