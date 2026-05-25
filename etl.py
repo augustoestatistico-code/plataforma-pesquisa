@@ -18,40 +18,18 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 
 # ======================
-# BUSCAR TODAS PESQUISAS
+# BUSCAR TODAS PÁGINAS ODK
 # ======================
 
-pesquisas = pd.read_sql("""
-SELECT
-    id,
-    nome,
-    projeto_odk,
-    form_id
-FROM pesquisas
-ORDER BY id
-""", engine)
+def buscar_todas_submissoes(url):
 
-print("PESQUISAS ENCONTRADAS:")
-print(pesquisas[["id","nome"]])
+    todos=[]
 
-# ======================
-# LOOP EM TODAS
-# ======================
+    while url:
 
-for _, pesquisa in pesquisas.iterrows():
+        print("BUSCANDO:",url)
 
-    try:
-
-        print(f"\nPROCESSANDO: {pesquisa['nome']}")
-
-        url = (
-            f"{ODK_URL}/v1/projects/"
-            f"{pesquisa['projeto_odk']}"
-            f"/forms/"
-            f"{pesquisa['form_id']}.svc/Submissions"
-        )
-
-        r = requests.get(
+        r=requests.get(
             url,
             auth=HTTPBasicAuth(
                 ODK_USER,
@@ -59,49 +37,141 @@ for _, pesquisa in pesquisas.iterrows():
             )
         )
 
-        if r.status_code != 200:
+        if r.status_code!=200:
 
             print(
-                f"ERRO API {r.status_code}"
+                "ERRO API:",
+                r.status_code
             )
 
-            continue
+            print(
+                r.text[:500]
+            )
 
-        data = r.json().get(
+            return []
+
+        js=r.json()
+
+        pagina=js.get(
             "value",
             []
         )
 
-        df = pd.DataFrame(data)
-
-        print(
-            "TOTAL:",
-            len(df)
+        todos.extend(
+            pagina
         )
 
-        if df.empty:
+        url=js.get(
+            "@odata.nextLink"
+        )
+
+    return todos
+
+
+# ======================
+# BUSCAR PESQUISAS
+# ======================
+
+pesquisas=pd.read_sql("""
+
+SELECT
+    id,
+    nome,
+    projeto_odk,
+    form_id
+
+FROM pesquisas
+
+ORDER BY id
+
+""",engine)
+
+print("\nPESQUISAS ENCONTRADAS:")
+print(
+    pesquisas[
+        ["id","nome"]
+    ]
+)
+
+# ======================
+# LOOP
+# ======================
+
+for _,pesquisa in pesquisas.iterrows():
+
+    try:
+
+        print(
+            "\n================="
+        )
+
+        print(
+            "PROCESSANDO:",
+            pesquisa["nome"]
+        )
+
+        url=(
+
+            f"{ODK_URL}/v1/projects/"
+            f"{pesquisa['projeto_odk']}"
+            f"/forms/"
+            f"{pesquisa['form_id']}"
+            ".svc/Submissions"
+
+        )
+
+        data=buscar_todas_submissoes(
+            url
+        )
+
+        print(
+            "TOTAL ODK:",
+            len(data)
+        )
+
+        if len(data)==0:
+
             continue
+
+        df=pd.DataFrame(data)
 
         with engine.begin() as conn:
 
-            for _, row in df.iterrows():
+            for _,row in df.iterrows():
 
-                dados = (
+                dados=(
+
                     row.where(
                         pd.notnull(row),
                         None
                     )
+
                     .to_dict()
+
                 )
 
-                sexo = dados.get("SEXO")
-                idade = dados.get("IDADE")
-                localidade = dados.get("LOCALIDADE")
-                entrevistador = dados.get("ENTREVISTADOR")
+                sexo=dados.get(
+                    "SEXO"
+                )
+
+                idade=dados.get(
+                    "IDADE"
+                )
+
+                localidade=dados.get(
+                    "LOCALIDADE"
+                )
+
+                entrevistador=dados.get(
+                    "ENTREVISTADOR"
+                )
 
                 conn.execute(
+
                     text("""
+
                     INSERT INTO entrevistas(
+
                         submission_id,
                         pesquisa_id,
                         sexo,
@@ -109,8 +179,11 @@ for _, pesquisa in pesquisas.iterrows():
                         localidade,
                         entrevistador,
                         dados
+
                     )
+
                     VALUES(
+
                         :submission_id,
                         :pesquisa_id,
                         :sexo,
@@ -118,49 +191,71 @@ for _, pesquisa in pesquisas.iterrows():
                         :localidade,
                         :entrevistador,
                         :dados
+
                     )
+
                     ON CONFLICT
                     (submission_id)
+
                     DO NOTHING
+
                     """),
+
                     {
+
                         "submission_id":
-                        dados.get("__id"),
+
+                        dados.get(
+                            "__id"
+                        ),
 
                         "pesquisa_id":
+
                         int(
                             pesquisa["id"]
                         ),
 
                         "sexo":
+
                         sexo,
 
                         "idade":
+
                         idade,
 
                         "localidade":
+
                         localidade,
 
                         "entrevistador":
+
                         entrevistador,
 
                         "dados":
+
                         json.dumps(
                             dados,
                             ensure_ascii=False
                         )
+
                     }
+
                 )
 
         print(
-            f"OK: {pesquisa['nome']}"
+            "OK:",
+            pesquisa["nome"]
         )
 
     except Exception as e:
 
         print(
-            f"ERRO {pesquisa['nome']}:",
-            e
+            "ERRO:",
+            pesquisa["nome"]
+        )
+
+        print(
+            str(e)
         )
 
 print("\nETL FINALIZADO")
