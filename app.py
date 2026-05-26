@@ -121,6 +121,34 @@ def lista_pesquisas(cliente_id):
 
     return [{"label": row["nome"], "value": row["id"]} for _, row in df.iterrows()]
 
+def carregar_labels(pesquisa_id):
+
+    df = pd.read_sql(
+        text("""
+        SELECT
+            name,
+            label
+        FROM perguntas_pesquisa
+        WHERE pesquisa_id=:pesquisa_id
+        """),
+        engine,
+        params={
+            "pesquisa_id": pesquisa_id
+        }
+    )
+
+    labels={}
+
+    for _,row in df.iterrows():
+
+        labels[
+            str(row["name"]).strip().upper()
+        ] = str(
+            row["label"]
+        )
+
+    return labels
+
 
 def carregar_dados(pesquisa_id):
     df = pd.read_sql(
@@ -198,7 +226,10 @@ def pergunta_deve_ignorar(coluna):
         "loc1",
         "pesquisa_inicio",
         "pesquisa_fim",
-        "hoje"
+        "hoje",
+        "HOJE",
+        "PESQUISA_INICIO",
+        "PESQUISA_FIM"
     }
 
     if coluna in colunas_ignorar_fixas:
@@ -213,7 +244,10 @@ def pergunta_deve_ignorar(coluna):
     return False
 
 
-def gerar_graficos_perguntas(df):
+def gerar_graficos_perguntas(
+    df,
+    pesquisa_id
+):
     perguntas = []
 
     if "dados" not in df.columns:
@@ -225,6 +259,10 @@ def gerar_graficos_perguntas(df):
     if json_df.empty:
         return perguntas
 
+    labels = carregar_labels(
+        pesquisa_id
+    )
+    
     for coluna in json_df.columns:
         if pergunta_deve_ignorar(coluna):
             continue
@@ -248,14 +286,21 @@ def gerar_graficos_perguntas(df):
         if len(contagem) > 15:
             contagem = contagem.head(15)
 
-        fig = px.bar(
-            contagem.sort_values("Quantidade", ascending=True),
-            x="Quantidade",
-            y="Resposta",
-            orientation="h",
-            text="Texto",
-            title=f"Pergunta: {coluna}"
-        )
+titulo = labels.get(
+    coluna.upper(),
+    coluna
+)
+
+fig = px.bar(
+    contagem.sort_values("Quantidade", ascending=True),
+    x="Quantidade",
+    y="Resposta",
+    orientation="h",
+    text="Texto",
+    title=titulo
+)            
+
+
         fig = tema_fig(fig)
 
         perguntas.append(
