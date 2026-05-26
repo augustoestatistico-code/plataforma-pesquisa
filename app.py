@@ -251,52 +251,57 @@ def gerar_graficos_perguntas(df, pesquisa_id):
         if len(contagem) > 15:
             contagem = contagem.head(15)
 
-label = coluna
+        label = coluna
 
-try:
+        try:
 
-    df_label = pd.read_sql(
-        text("""
-        SELECT label
-        FROM perguntas_pesquisa
-        WHERE pesquisa_id=:pesquisa_id
-        AND UPPER(name)=:name
-        LIMIT 1
-        """),
-        engine,
-        params={
-            "pesquisa_id": pesquisa_id,
-            "name": coluna.upper()
-        }
-    )
+            df_label = pd.read_sql(
+                text("""
+                SELECT label
+                FROM perguntas_pesquisa
+                WHERE pesquisa_id=:pesquisa_id
+                AND UPPER(name)=:name
+                LIMIT 1
+                """),
+                engine,
+                params={
+                    "pesquisa_id": pesquisa_id,
+                    "name": coluna.upper()
+                }
+            )
 
-    if not df_label.empty:
-        label = df_label.iloc[0]["label"]
+            if not df_label.empty:
+                label = df_label.iloc[0]["label"]
 
-except:
-    pass
+        except:
+            pass
 
-
-fig = px.bar(
-    contagem.sort_values("Quantidade", ascending=True),
-    x="Quantidade",
-    y="Resposta",
-    orientation="h",
-    text="Texto",
-    title=label
-)
+        fig = px.bar(
+            contagem.sort_values(
+                "Quantidade",
+                ascending=True
+            ),
+            x="Quantidade",
+            y="Resposta",
+            orientation="h",
+            text="Texto",
+            title=label
+        )
 
         fig = tema_fig(fig)
 
         perguntas.append(
             html.Div([
-                dcc.Graph(figure=fig)
-            ], style={
-                "background": "#111827",
-                "borderRadius": "18px",
-                "border": "1px solid #1f2937",
-                "marginBottom": "18px",
-                "padding": "10px"
+                dcc.Graph(
+                    figure=fig
+                )
+            ],
+            style={
+                "background":"#111827",
+                "borderRadius":"18px",
+                "border":"1px solid #1f2937",
+                "marginBottom":"18px",
+                "padding":"10px"
             })
         )
 
