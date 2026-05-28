@@ -252,7 +252,7 @@ def pergunta_deve_ignorar(coluna):
     return False
 
 
-def gerar_graficos_perguntas(df):
+def gerar_graficos_perguntas(df, pesquisa_id):
     perguntas = []
 
     if "dados" not in df.columns:
