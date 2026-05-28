@@ -194,19 +194,31 @@ def extrair_gps(df):
     return pd.DataFrame(pontos)
 
 
-def card(titulo, valor, subtitulo=""):
+def card(titulo, valor, subtitulo="", cor="#2563eb"):
     return html.Div([
-        html.Div(titulo, style={"fontSize": "13px", "color": "#94a3b8"}),
-        html.Div(valor, style={"fontSize": "30px", "fontWeight": "bold", "marginTop": "6px"}),
-        html.Div(subtitulo, style={"fontSize": "12px", "color": "#64748b", "marginTop": "4px"})
+        html.Div(titulo.upper(), style={
+            "fontSize": "12px",
+            "fontWeight": "bold",
+            "color": "#bfdbfe"
+        }),
+        html.Div(valor, style={
+            "fontSize": "34px",
+            "fontWeight": "bold",
+            "marginTop": "8px",
+            "color": "white"
+        }),
+        html.Div(subtitulo, style={
+            "fontSize": "12px",
+            "color": "#cbd5e1",
+            "marginTop": "6px"
+        })
     ], style={
-        "background": "#111827",
+        "background": f"linear-gradient(135deg, {cor}, #0f172a)",
         "padding": "22px",
-        "borderRadius": "18px",
-        "boxShadow": "0 8px 25px rgba(0,0,0,.35)",
-        "border": "1px solid #1f2937"
+        "borderRadius": "16px",
+        "border": "1px solid #1e293b",
+        "boxShadow": "0 8px 24px rgba(0,0,0,.35)"
     })
-
 
 def tema_fig(fig):
     fig.update_layout(
@@ -332,6 +344,7 @@ def gerar_graficos_perguntas(df, pesquisa_id):
         )
 
     return perguntas
+
 
 # =========================
 # LAYOUT
@@ -519,10 +532,10 @@ def atualizar_dashboard(pesquisa_id):
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
     kpis = [
-        card("Total de Entrevistas", f"{total:,}".replace(",", "."), "Amostra realizada"),
-        card("Masculino", f"{masc_pct}%", f"{masc} entrevistas"),
-        card("Feminino", f"{fem_pct}%", f"{fem} entrevistas"),
-        card("Localidades", localidades, f"{entrevistadores} entrevistadores"),
+        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra realizada", "#1d4ed8"),
+        card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
+        card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
+        card("Localidades", localidades, f"{entrevistadores} entrevistadores", "#7e22ce"),
     ]
 
     sexo_df = df["sexo"].value_counts().reset_index()
@@ -625,17 +638,6 @@ def atualizar_dashboard(pesquisa_id):
             zoom=12,
             height=650,
             size=[14] * len(gps_df),
-            title="Mapa das Entrevistas"
-        )
-        
-        fig_mapa = px.scatter_mapbox(
-            gps_df,
-            lat="lat",
-            lon="lon",
-            hover_name="localidade",
-            hover_data=["entrevistador"],
-            zoom=12,
-            height=500,
             title="Mapa das Entrevistas"
         )
 
