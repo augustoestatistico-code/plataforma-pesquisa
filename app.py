@@ -161,6 +161,39 @@ def normalizar_json(valor):
     return {}
 
 
+def extrair_gps(df):
+    pontos = []
+
+    if "dados" not in df.columns:
+        return pd.DataFrame()
+
+    for _, row in df.iterrows():
+        dados = normalizar_json(row.get("dados"))
+
+        lat = dados.get("latitude_melhor") or dados.get("lat_final") or dados.get("lat_inicio")
+        lon = dados.get("longitude_melhor") or dados.get("lon_final") or dados.get("lon_inicio")
+
+        if (not lat or not lon) and isinstance(dados.get("gps_final"), dict):
+            coords = dados["gps_final"].get("coordinates", [])
+            if len(coords) >= 2:
+                lon = coords[0]
+                lat = coords[1]
+
+        try:
+            if lat and lon:
+                pontos.append({
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "localidade": row.get("localidade", ""),
+                    "entrevistador": row.get("entrevistador", ""),
+                    "accuracy": dados.get("accuracy_melhor") or dados.get("acc_final") or ""
+                })
+        except:
+            pass
+
+    return pd.DataFrame(pontos)
+
+
 def card(titulo, valor, subtitulo=""):
     return html.Div([
         html.Div(titulo, style={"fontSize": "13px", "color": "#94a3b8"}),
@@ -340,6 +373,12 @@ app.layout = html.Div([
     html.Div([
         dcc.Graph(id="grafico-localidade"),
     ], style={"padding": "0 28px 22px"}),
+    
+    html.Div([
+    dcc.Graph(id="mapa-gps")
+    ], style={"padding": "0 28px 22px"}),
+
+
 
     html.Div([
         html.Div([
@@ -419,22 +458,26 @@ def inicializar_dashboard(pathname):
 # =========================
 # CALLBACK DASHBOARD
 # =========================
+
 @app.callback(
     [
         Output("kpis", "children"),
         Output("grafico-sexo", "figure"),
         Output("grafico-idade", "figure"),
         Output("grafico-localidade", "figure"),
+        Output("mapa-gps", "figure"),
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
     ],
+
+    
     Input("pesquisa", "value")
 )
 def atualizar_dashboard(pesquisa_id):
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", ""
+        return [], fig_vazio, fig_vazio, fig_vazio, fig_vazio, "", ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -442,7 +485,7 @@ def atualizar_dashboard(pesquisa_id):
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
+        ], fig_vazio, fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
 
     total = len(df)
     localidades = df["localidade"].nunique()
@@ -544,7 +587,34 @@ def atualizar_dashboard(pesquisa_id):
         page_size=10
     )
 
-    perguntas = gerar_graficos_perguntas(df)
+
+    gps_df = extrair_gps(df)
+
+    if gps_df.empty:
+        fig_mapa = tema_fig(
+            px.scatter(title="Sem GPS disponível nesta pesquisa")
+        )
+    else:
+        fig_mapa = px.scatter_mapbox(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            hover_name="localidade",
+            hover_data=["entrevistador"],
+            zoom=12,
+            height=500,
+            title="Mapa das Entrevistas"
+        )
+
+        fig_mapa.update_layout(
+            mapbox_style="open-street-map",
+            paper_bgcolor="#111827",
+            plot_bgcolor="#111827",
+            font_color="#e5e7eb",
+            margin=dict(l=0, r=0, t=50, b=0)
+        )
+
+    perguntas = gerar_graficos_perguntas(df, pesquisa_id)
 
     if not perguntas:
         perguntas = [
@@ -560,10 +630,10 @@ def atualizar_dashboard(pesquisa_id):
         fig_sexo,
         fig_idade,
         fig_localidade,
+        fig_mapa,
         tabela_ent,
         perguntas
     )
-
 
 # =========================
 # ETL ENDPOINT
