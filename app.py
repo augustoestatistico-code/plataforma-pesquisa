@@ -565,6 +565,9 @@ def atualizar_dashboard(pesquisa_id):
 # =========================
 # ETL ENDPOINT
 # =========================
+import subprocess
+import sys
+
 @server.route("/etl")
 def rodar_etl():
     token = request.args.get("token")
@@ -572,8 +575,22 @@ def rodar_etl():
     if token != "123456":
         return "Acesso negado", 403
 
-    os.system("python etl.py")
-    return "ETL executado com sucesso"
+    resultado = subprocess.run(
+        [sys.executable, "etl.py"],
+        capture_output=True,
+        text=True,
+        timeout=600
+    )
+
+    return f"""
+    <h2>ETL executado</h2>
+    <h3>Saída</h3>
+    <pre>{resultado.stdout}</pre>
+    <h3>Erros</h3>
+    <pre>{resultado.stderr}</pre>
+    <h3>Código retorno</h3>
+    <pre>{resultado.returncode}</pre>
+    """
 
 
 # =========================
