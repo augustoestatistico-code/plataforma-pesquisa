@@ -264,7 +264,26 @@ def gerar_graficos_perguntas(df, pesquisa_id):
     if json_df.empty:
         return perguntas
 
+    perguntas_exibir = pd.read_sql(
+        text("""
+            SELECT UPPER(name) AS name, label
+            FROM perguntas_pesquisa
+            WHERE pesquisa_id = :pesquisa_id
+            AND exibir_dashboard = true
+        """),
+        engine,
+        params={"pesquisa_id": pesquisa_id}
+    )
+
+    lista_exibir = set(perguntas_exibir["name"].tolist())
+    labels = dict(zip(perguntas_exibir["name"], perguntas_exibir["label"]))
+
     for coluna in json_df.columns:
+        coluna_upper = coluna.upper()
+
+        if coluna_upper not in lista_exibir:
+            continue
+
         if pergunta_deve_ignorar(coluna):
             continue
 
@@ -287,14 +306,17 @@ def gerar_graficos_perguntas(df, pesquisa_id):
         if len(contagem) > 15:
             contagem = contagem.head(15)
 
+        titulo = labels.get(coluna_upper, coluna)
+
         fig = px.bar(
             contagem.sort_values("Quantidade", ascending=True),
             x="Quantidade",
             y="Resposta",
             orientation="h",
             text="Texto",
-            title=f"Pergunta: {coluna}"
+            title=titulo
         )
+
         fig = tema_fig(fig)
 
         perguntas.append(
@@ -310,7 +332,6 @@ def gerar_graficos_perguntas(df, pesquisa_id):
         )
 
     return perguntas
-
 
 # =========================
 # LAYOUT
@@ -595,6 +616,18 @@ def atualizar_dashboard(pesquisa_id):
             px.scatter(title="Sem GPS disponível nesta pesquisa")
         )
     else:
+        fig_mapa = px.scatter_mapbox(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            hover_name="localidade",
+            hover_data=["entrevistador", "accuracy"],
+            zoom=12,
+            height=650,
+            size=[14] * len(gps_df),
+            title="Mapa das Entrevistas"
+        )
+        
         fig_mapa = px.scatter_mapbox(
             gps_df,
             lat="lat",
