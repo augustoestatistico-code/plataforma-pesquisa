@@ -6,6 +6,9 @@ import dash
 from dash import dcc, html, Input, Output, dash_table
 import plotly.express as px
 from flask import Flask, request, session, redirect
+import subprocess
+import sys
+
 
 # =========================
 # CONFIG
@@ -565,9 +568,6 @@ def atualizar_dashboard(pesquisa_id):
 # =========================
 # ETL ENDPOINT
 # =========================
-import subprocess
-import sys
-
 @server.route("/etl")
 def rodar_etl():
     token = request.args.get("token")
