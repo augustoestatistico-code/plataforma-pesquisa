@@ -278,19 +278,39 @@ def gerar_graficos_perguntas(df, pesquisa_id):
 
     perguntas_exibir = pd.read_sql(
         text("""
-            SELECT UPPER(name) AS name, label
+            SELECT
+                UPPER(name) AS name,
+                label,
+                id
             FROM perguntas_pesquisa
             WHERE pesquisa_id = :pesquisa_id
             AND exibir_dashboard = true
+            ORDER BY id
         """),
         engine,
         params={"pesquisa_id": pesquisa_id}
     )
 
+
+
     lista_exibir = set(perguntas_exibir["name"].tolist())
     labels = dict(zip(perguntas_exibir["name"], perguntas_exibir["label"]))
+    ordem_perguntas = perguntas_exibir["name"].tolist()
+    
+    for coluna_upper in ordem_perguntas:
 
-    for coluna in json_df.columns:
+        coluna_real = None
+
+        for c in json_df.columns:
+            if c.upper() == coluna_upper:
+                coluna_real = c
+                break
+
+        if coluna_real is None:
+            continue
+
+        coluna = coluna_real
+    
         coluna_upper = coluna.upper()
 
         if coluna_upper not in lista_exibir:
@@ -403,15 +423,10 @@ app.layout = html.Div([
         "gap": "18px",
         "padding": "0 28px 22px"
     }),
-
-    html.Div([
-        dcc.Graph(id="grafico-localidade"),
-    ], style={"padding": "0 28px 22px"}),
     
     html.Div([
     dcc.Graph(id="mapa-gps")
     ], style={"padding": "0 28px 22px"}),
-
 
 
     html.Div([
@@ -498,7 +513,6 @@ def inicializar_dashboard(pathname):
         Output("kpis", "children"),
         Output("grafico-sexo", "figure"),
         Output("grafico-idade", "figure"),
-        Output("grafico-localidade", "figure"),
         Output("mapa-gps", "figure"),
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
@@ -511,7 +525,7 @@ def atualizar_dashboard(pesquisa_id):
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, fig_vazio, "", ""
+        return [], fig_vazio, fig_vazio, fig_vazio, "", ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -519,7 +533,7 @@ def atualizar_dashboard(pesquisa_id):
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
 
     total = len(df)
     localidades = df["localidade"].nunique()
@@ -531,11 +545,12 @@ def atualizar_dashboard(pesquisa_id):
     masc_pct = round((masc / total) * 100, 1) if total else 0
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
+
     kpis = [
         card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra realizada", "#1d4ed8"),
         card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
         card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
-        card("Localidades", localidades, f"{entrevistadores} entrevistadores", "#7e22ce"),
+        card("Entrevistadores", entrevistadores, "Equipe em campo", "#7e22ce"),
     ]
 
     sexo_df = df["sexo"].value_counts().reset_index()
@@ -664,7 +679,6 @@ def atualizar_dashboard(pesquisa_id):
         kpis,
         fig_sexo,
         fig_idade,
-        fig_localidade,
         fig_mapa,
         tabela_ent,
         perguntas
