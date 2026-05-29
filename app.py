@@ -369,89 +369,194 @@ def gerar_graficos_perguntas(df, pesquisa_id):
 # =========================
 # LAYOUT
 # =========================
+
+# =========================
+# LAYOUT POWER BI
+# =========================
 app.layout = html.Div([
     dcc.Location(id="url"),
 
+    # SIDEBAR
     html.Div([
         html.Div([
-            html.H2("📊 Dashboard Pesquisa", style={"margin": "0"}),
-            html.Div(id="cliente-header", style={"color": "#94a3b8", "marginTop": "6px"}),
-        ]),
+            html.H2([
+                html.Span("Ipsensus", style={"color": "#1e88ff"}),
+                html.Span(" Survey", style={"color": "white"})
+            ], style={"margin": "0", "fontSize": "24px"}),
 
-        html.Div([
+            html.Div("MENU", style={
+                "color": "#94a3b8",
+                "fontSize": "13px",
+                "marginTop": "30px",
+                "marginBottom": "12px"
+            }),
+
+            html.Div("📊 Visão Geral", style={
+                "background": "#2563eb",
+                "padding": "12px",
+                "borderRadius": "8px",
+                "marginBottom": "10px",
+                "fontWeight": "bold"
+            }),
+
+            html.Div("📝 Entrevistas", style={"padding": "10px", "color": "#cbd5e1"}),
+            html.Div("🗺️ Mapas", style={"padding": "10px", "color": "#cbd5e1"}),
+            html.Div("📋 Perguntas", style={"padding": "10px", "color": "#cbd5e1"}),
+            html.Div("👥 Entrevistadores", style={"padding": "10px", "color": "#cbd5e1"}),
+            html.Div("📄 Relatórios", style={"padding": "10px", "color": "#cbd5e1"}),
+
+            html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
+
+            html.Div("FILTROS", style={
+                "color": "#94a3b8",
+                "fontSize": "13px",
+                "marginBottom": "12px"
+            }),
+
+            html.Label("Pesquisa", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="pesquisa",
+                options=[],
+                value=None,
+                placeholder="Selecione",
+                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+            ),
+
+            html.Label("Localidade", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="filtro-localidade",
+                options=[],
+                value=None,
+                placeholder="Todas",
+                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+            ),
+
+            html.Label("Entrevistador", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="filtro-entrevistador",
+                options=[],
+                value=None,
+                placeholder="Todos",
+                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+            ),
+
             html.A("Sair", href="/logout", style={
+                "display": "block",
+                "marginTop": "25px",
                 "color": "white",
                 "background": "#dc2626",
-                "padding": "10px 18px",
-                "borderRadius": "10px",
+                "padding": "10px",
+                "borderRadius": "8px",
+                "textAlign": "center",
                 "textDecoration": "none"
-            })
+            }),
         ])
     ], style={
-        "display": "flex",
-        "justifyContent": "space-between",
-        "alignItems": "center",
-        "padding": "22px 28px",
+        "position": "fixed",
+        "left": "0",
+        "top": "0",
+        "bottom": "0",
+        "width": "260px",
         "background": "#020617",
-        "borderBottom": "1px solid #1f2937"
+        "padding": "24px 16px",
+        "borderRight": "1px solid #1f2937",
+        "color": "white",
+        "overflowY": "auto"
     }),
 
+    # CONTEÚDO PRINCIPAL
     html.Div([
-        html.Label("Selecione a pesquisa", style={"fontWeight": "bold"}),
-        dcc.Dropdown(
-            id="pesquisa",
-            options=[],
-            value=None,
-            placeholder="Escolha uma pesquisa",
-            style={"color": "#111827", "marginTop": "8px"}
-        )
-    ], style={"padding": "22px 28px"}),
 
-    html.Div(id="kpis", style={
-        "display": "grid",
-        "gridTemplateColumns": "repeat(4, 1fr)",
-        "gap": "18px",
-        "padding": "0 28px 22px"
-    }),
-
-    html.Div([
-        dcc.Graph(id="grafico-sexo"),
-        dcc.Graph(id="grafico-idade"),
-    ], style={
-        "display": "grid",
-        "gridTemplateColumns": "1fr 1fr",
-        "gap": "18px",
-        "padding": "0 28px 22px"
-    }),
-    
-    html.Div([
-    dcc.Graph(id="mapa-gps")
-    ], style={"padding": "0 28px 22px"}),
-
-
-    html.Div([
+        # TOPO
         html.Div([
-            html.H3("Produção por Entrevistador"),
-            html.Div(id="tabela-entrevistador")
+            html.Div([
+                html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+                html.Div("Dados atualizados automaticamente", style={
+                    "color": "#94a3b8",
+                    "fontSize": "13px",
+                    "marginTop": "4px"
+                }),
+            ]),
+
+            html.Div(id="cliente-header", style={"color": "#cbd5e1"})
         ], style={
-            "background": "#111827",
-            "padding": "20px",
-            "borderRadius": "18px",
-            "border": "1px solid #1f2937"
-        })
-    ], style={"padding": "0 28px 22px"}),
+            "display": "flex",
+            "justifyContent": "space-between",
+            "alignItems": "center",
+            "marginBottom": "22px"
+        }),
 
-    html.Div([
-        html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
-        html.Div(id="perguntas-dinamicas")
-    ], style={"padding": "0 28px 40px"}),
+        # KPIS
+        html.Div(id="kpis", style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(4, 1fr)",
+            "gap": "18px",
+            "marginBottom": "20px"
+        }),
 
-], style={
-    "background": "#0f172a",
-    "minHeight": "100vh",
-    "color": "#e5e7eb",
-    "fontFamily": "Arial, sans-serif"
-})
+        # GRÁFICOS SUPERIORES
+        html.Div([
+            html.Div([dcc.Graph(id="grafico-sexo")], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "10px"
+            }),
+
+            html.Div([dcc.Graph(id="grafico-idade")], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "10px"
+            }),
+        ], style={
+            "display": "grid",
+            "gridTemplateColumns": "1fr 1fr",
+            "gap": "18px",
+            "marginBottom": "20px"
+        }),
+
+        # MAPA + TABELA
+        html.Div([
+            html.Div([dcc.Graph(id="mapa-gps")], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "10px"
+            }),
+
+            html.Div([
+                html.H3("Desempenho por Entrevistador", style={"marginTop": "0"}),
+                html.Div(id="tabela-entrevistador")
+            ], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "18px"
+            }),
+        ], style={
+            "display": "grid",
+            "gridTemplateColumns": "1.4fr 1fr",
+            "gap": "18px",
+            "marginBottom": "20px"
+        }),
+
+        # PERGUNTAS
+        html.Div([
+            html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
+            html.Div(id="perguntas-dinamicas")
+        ])
+
+    ], style={
+        "marginLeft": "260px",
+        "padding": "24px",
+        "background": "#0f172a",
+        "minHeight": "100vh",
+        "color": "#e5e7eb",
+        "fontFamily": "Arial, sans-serif"
+    })
+
+])
 
 
 # =========================
