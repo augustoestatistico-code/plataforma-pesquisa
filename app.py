@@ -365,6 +365,41 @@ def gerar_graficos_perguntas(df, pesquisa_id):
 
     return perguntas
 
+# =========================
+# NOVA FUNÇÃO
+# =========================
+def carregar_audios(pesquisa_id):
+
+    try:
+
+        sql = """
+            SELECT
+                entrevistador,
+                localidade,
+                data_entrevista,
+                audio_url
+            FROM audios_entrevistas
+            WHERE pesquisa_id = %(pesquisa_id)s
+            ORDER BY id DESC
+            LIMIT 100
+        """
+
+        df = pd.read_sql(
+            sql,
+            engine,
+            params={"pesquisa_id": pesquisa_id}
+        )
+
+        if df.empty:
+            return html.Div(
+                "Nenhum áudio disponível nesta pesquisa."
+            )
+
+        ...
+        
+    except Exception as e:
+        return html.Div(f"Erro: {e}")
+    
 
 # =========================
 # LAYOUT
@@ -542,10 +577,27 @@ app.layout = html.Div([
         }),
 
         # PERGUNTAS
-        html.Div([
-            html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
-            html.Div(id="perguntas-dinamicas")
-        ])
+            html.Div([
+                html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
+                html.Div(id="perguntas-dinamicas")
+            ]),
+
+        # AUDITORIA DE ÁUDIOS
+            html.Div([
+                html.H2("Auditoria de Áudios", style={
+                    "marginTop": "30px",
+                    "marginBottom": "16px"
+                }),
+
+                html.Div(id="audios-entrevistas")
+
+            ], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "20px",
+                "marginTop": "20px"
+            }),
 
     ], style={
         "marginLeft": "260px",
@@ -621,6 +673,7 @@ def inicializar_dashboard(pathname):
         Output("mapa-gps", "figure"),
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
+        Output("audios-entrevistas", "children"),
     ],
 
     
@@ -630,7 +683,7 @@ def atualizar_dashboard(pesquisa_id):
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", ""
+        return [], fig_vazio, fig_vazio, fig_vazio, "", "", ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -638,7 +691,7 @@ def atualizar_dashboard(pesquisa_id):
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", ""
 
     total = len(df)
     localidades = df["localidade"].nunique()
@@ -771,6 +824,8 @@ def atualizar_dashboard(pesquisa_id):
 
     perguntas = gerar_graficos_perguntas(df, pesquisa_id)
 
+    audios = carregar_audios(pesquisa_id)
+    
     if not perguntas:
         perguntas = [
             html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
@@ -786,7 +841,8 @@ def atualizar_dashboard(pesquisa_id):
         fig_idade,
         fig_mapa,
         tabela_ent,
-        perguntas
+        perguntas,
+        audios
     )
 
 # =========================
