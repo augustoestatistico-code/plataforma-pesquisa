@@ -5,10 +5,12 @@ from sqlalchemy import create_engine, text
 import dash
 from dash import dcc, html, Input, Output, dash_table
 import plotly.express as px
-from flask import Flask, request, session, redirect
+from flask import Flask, request, session, redirect, Response
 import subprocess
 import sys
-
+import requests
+from requests.auth import HTTPBasicAuth
+import urllib.parse
 
 # =========================
 # CONFIG
@@ -366,41 +368,59 @@ def gerar_graficos_perguntas(df, pesquisa_id):
     return perguntas
 
 # =========================
-# NOVA FUNÇÃO
+# ÁUDIOS
 # =========================
 def carregar_audios(pesquisa_id):
 
     try:
-
         sql = """
             SELECT
+                pesquisa_id,
+                submission_id,
                 entrevistador,
                 localidade,
                 data_entrevista,
-                audio_url
+                nome_arquivo
             FROM audios_entrevistas
             WHERE pesquisa_id = %(pesquisa_id)s
             ORDER BY id DESC
             LIMIT 100
         """
 
-        df = pd.read_sql(
-            sql,
-            engine,
-            params={"pesquisa_id": pesquisa_id}
-        )
+        df = pd.read_sql(sql, engine, params={"pesquisa_id": pesquisa_id})
 
         if df.empty:
-            return html.Div(
-                "Nenhum áudio disponível nesta pesquisa."
-            )
+            return html.Div("Nenhum áudio disponível nesta pesquisa.", style={"color": "#9ca3af"})
 
-        ...
-        
+        linhas = []
+
+        for _, row in df.iterrows():
+            audio_src = f"/audio/{row['pesquisa_id']}/{row['submission_id']}/{row['nome_arquivo']}"
+
+            linhas.append(html.Tr([
+                html.Td(row["entrevistador"]),
+                html.Td(row["localidade"]),
+                html.Td(str(row["data_entrevista"])),
+                html.Td( html.Audio(
+                            src=audio_src,
+                            controls=True,
+                            style={"width": "300px"}
+                        ))
+            ]))
+
+        return html.Table([
+            html.Thead(html.Tr([
+                html.Th("Entrevistador"),
+                html.Th("Localidade"),
+                html.Th("Data"),
+                html.Th("Áudio")
+            ])),
+            html.Tbody(linhas)
+        ], style={"width": "100%", "color": "white"})
+
     except Exception as e:
-        return html.Div(f"Erro: {e}")
+        return html.Div(f"Erro ao carregar áudios: {e}")
     
-
 # =========================
 # LAYOUT
 # =========================
@@ -843,6 +863,92 @@ def atualizar_dashboard(pesquisa_id):
         tabela_ent,
         perguntas,
         audios
+    )
+ODK_URL = "https://app.ar7pesquisas.com.br"
+ODK_USER = "augusto.estatistico@gmail.com"
+ODK_PASS = "@Mat050dois"
+
+
+# =========================
+# AUDIO ENDPOINT
+# =========================
+@server.route("/audio/<int:pesquisa_id>/<path:submission_id>/<path:nome_arquivo>")
+def ouvir_audio(pesquisa_id, submission_id, nome_arquivo):
+
+    if "cliente_id" not in session:
+        return "Não autorizado", 403
+
+    df = pd.read_sql(
+        text("""
+            SELECT projeto_odk, form_id
+            FROM pesquisas
+            WHERE id = :pesquisa_id
+        """),
+        engine,
+        params={"pesquisa_id": pesquisa_id}
+    )
+
+    if df.empty:
+        return "Pesquisa não encontrada", 404
+
+    projeto_odk = df.iloc[0]["projeto_odk"]
+    form_id = df.iloc[0]["form_id"]
+
+    import urllib.parse
+    import tempfile
+    import subprocess
+    import requests
+    from requests.auth import HTTPBasicAuth
+
+    submission_encoded = urllib.parse.quote(submission_id, safe="")
+    arquivo_encoded = urllib.parse.quote(nome_arquivo, safe="")
+
+    url = (
+        f"https://app.ar7pesquisas.com.br/v1/projects/{projeto_odk}"
+        f"/forms/{form_id}"
+        f"/submissions/{submission_encoded}"
+        f"/attachments/{arquivo_encoded}"
+    )
+
+    r = requests.get(
+        url,
+        auth=HTTPBasicAuth(
+            "augusto.estatistico@gmail.com",
+            "@Mat050dois"
+        )
+    )
+
+    if r.status_code != 200:
+        return f"Erro ao buscar áudio: {r.status_code}", 500
+
+    with tempfile.NamedTemporaryFile(suffix=".amr", delete=False) as entrada:
+        entrada.write(r.content)
+        entrada_path = entrada.name
+
+    saida_path = entrada_path.replace(".amr", ".mp3")
+
+    processo = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i", entrada_path,
+            "-acodec", "libmp3lame",
+            "-ab", "64k",
+            saida_path
+        ],
+        capture_output=True,
+        text=True
+    )
+
+    if processo.returncode != 0:
+        return f"Erro ao converter áudio: {processo.stderr}", 500
+
+    with open(saida_path, "rb") as f:
+        audio_mp3 = f.read()
+
+    return Response(
+        audio_mp3,
+        mimetype="audio/mpeg"
     )
 
 # =========================
