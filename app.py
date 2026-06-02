@@ -494,7 +494,17 @@ app.layout = html.Div([
                 placeholder="Todos",
                 style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
             ),
-
+            html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="tipo-mapa",
+                options=[
+                    {"label": "Mapa de Pontos", "value": "pontos"},
+                    {"label": "Mapa de Calor", "value": "calor"},
+                ],
+                value="pontos",
+                clearable=False,
+                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+            ),
             html.A("Sair", href="/logout", style={
                 "display": "block",
                 "marginTop": "25px",
@@ -683,7 +693,6 @@ def inicializar_dashboard(pathname):
 
 # =========================
 # CALLBACK DASHBOARD
-# =========================
 
 @app.callback(
     [
@@ -694,16 +703,21 @@ def inicializar_dashboard(pathname):
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
         Output("audios-entrevistas", "children"),
+        Output("filtro-localidade", "options"),
+        Output("filtro-entrevistador", "options"),
     ],
-
-    
-    Input("pesquisa", "value")
+    [
+        Input("pesquisa", "value"),
+        Input("filtro-localidade", "value"),
+        Input("filtro-entrevistador", "value"),
+        Input("tipo-mapa", "value"),
+    ]
 )
-def atualizar_dashboard(pesquisa_id):
+def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, tipo_mapa):
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", "", ""
+        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], []
 
     df = carregar_dados(pesquisa_id)
 
@@ -711,10 +725,31 @@ def atualizar_dashboard(pesquisa_id):
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", ""
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], []
+
+    opcoes_localidade = [
+        {"label": x, "value": x}
+        for x in sorted(df["localidade"].dropna().unique())
+    ]
+
+    opcoes_entrevistador = [
+        {"label": x, "value": x}
+        for x in sorted(df["entrevistador"].dropna().unique())
+    ]
+
+    if filtro_localidade:
+        df = df[df["localidade"] == filtro_localidade]
+
+    if filtro_entrevistador:
+        df = df[df["entrevistador"] == filtro_entrevistador]
+
+    if df.empty:
+        fig_vazio = tema_fig(px.bar(title="Sem dados para o filtro selecionado"))
+        return [
+            card("Total", "0", "Filtro sem entrevistas")
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", opcoes_localidade, opcoes_entrevistador
 
     total = len(df)
-    localidades = df["localidade"].nunique()
     entrevistadores = df["entrevistador"].nunique()
 
     masc = int((df["sexo"] == "Masculino").sum())
@@ -723,9 +758,8 @@ def atualizar_dashboard(pesquisa_id):
     masc_pct = round((masc / total) * 100, 1) if total else 0
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
-
     kpis = [
-        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra realizada", "#1d4ed8"),
+        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra filtrada", "#1d4ed8"),
         card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
         card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
         card("Entrevistadores", entrevistadores, "Equipe em campo", "#7e22ce"),
@@ -733,6 +767,7 @@ def atualizar_dashboard(pesquisa_id):
 
     sexo_df = df["sexo"].value_counts().reset_index()
     sexo_df.columns = ["Sexo", "Quantidade"]
+
     fig_sexo = px.pie(
         sexo_df,
         names="Sexo",
@@ -769,27 +804,6 @@ def atualizar_dashboard(pesquisa_id):
     )
     fig_idade = tema_fig(fig_idade)
 
-    loc_df = df["localidade"].value_counts().reset_index()
-    loc_df.columns = ["Localidade", "Quantidade"]
-    loc_df["%"] = (loc_df["Quantidade"] / total * 100).round(1)
-    loc_df["Texto"] = (
-        loc_df["Quantidade"].astype(str)
-        + " ("
-        + loc_df["%"].astype(str)
-        + "%)"
-    )
-    loc_df = loc_df.sort_values("Quantidade", ascending=True)
-
-    fig_localidade = px.bar(
-        loc_df,
-        x="Quantidade",
-        y="Localidade",
-        orientation="h",
-        text="Texto",
-        title="Entrevistas por Localidade"
-    )
-    fig_localidade = tema_fig(fig_localidade)
-
     ent_df = df["entrevistador"].value_counts().reset_index()
     ent_df.columns = ["Entrevistador", "Quantidade"]
     ent_df["%"] = (ent_df["Quantidade"] / total * 100).round(1)
@@ -814,7 +828,6 @@ def atualizar_dashboard(pesquisa_id):
         page_size=10
     )
 
-
     gps_df = extrair_gps(df)
 
     if gps_df.empty:
@@ -822,17 +835,28 @@ def atualizar_dashboard(pesquisa_id):
             px.scatter(title="Sem GPS disponível nesta pesquisa")
         )
     else:
-        fig_mapa = px.scatter_mapbox(
-            gps_df,
-            lat="lat",
-            lon="lon",
-            hover_name="localidade",
-            hover_data=["entrevistador", "accuracy"],
-            zoom=12,
-            height=650,
-            size=[14] * len(gps_df),
-            title="Mapa das Entrevistas"
-        )
+        if tipo_mapa == "calor":
+            fig_mapa = px.density_mapbox(
+                gps_df,
+                lat="lat",
+                lon="lon",
+                radius=22,
+                zoom=12,
+                height=650,
+                title="Mapa de Calor das Entrevistas"
+            )
+        else:
+            fig_mapa = px.scatter_mapbox(
+                gps_df,
+                lat="lat",
+                lon="lon",
+                hover_name="localidade",
+                hover_data=["entrevistador", "accuracy"],
+                zoom=12,
+                height=650,
+                size=[14] * len(gps_df),
+                title="Mapa de Pontos das Entrevistas"
+            )
 
         fig_mapa.update_layout(
             mapbox_style="open-street-map",
@@ -843,9 +867,8 @@ def atualizar_dashboard(pesquisa_id):
         )
 
     perguntas = gerar_graficos_perguntas(df, pesquisa_id)
-
     audios = carregar_audios(pesquisa_id)
-    
+
     if not perguntas:
         perguntas = [
             html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
@@ -862,8 +885,11 @@ def atualizar_dashboard(pesquisa_id):
         fig_mapa,
         tabela_ent,
         perguntas,
-        audios
+        audios,
+        opcoes_localidade,
+        opcoes_entrevistador
     )
+
 ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"
