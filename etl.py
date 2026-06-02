@@ -165,6 +165,9 @@ for _,pesquisa in pesquisas.iterrows():
                 entrevistador=dados.get(
                     "ENTREVISTADOR"
                 )
+                audio_entrevista = dados.get(
+                    "audio_entrevista"
+                )
 
                 conn.execute(
 
@@ -241,6 +244,65 @@ for _,pesquisa in pesquisas.iterrows():
                     }
 
                 )
+
+                if audio_entrevista:
+
+                    conn.execute(
+
+                        text("""
+
+                            INSERT INTO audios_entrevistas(
+
+                                pesquisa_id,
+                                submission_id,
+                                entrevistador,
+                                localidade,
+                                data_entrevista,
+                                nome_arquivo
+
+                            )
+
+                            VALUES(
+
+                                :pesquisa_id,
+                                :submission_id,
+                                :entrevistador,
+                                :localidade,
+                                :data_entrevista,
+                                :nome_arquivo
+
+                            )
+
+                            ON CONFLICT
+                            (submission_id, nome_arquivo)
+
+                            DO NOTHING
+
+                        """),
+
+                        {
+
+                            "pesquisa_id":
+                            int(pesquisa["id"]),
+                            "submission_id":
+                            dados.get("__id"),
+
+                            "entrevistador":
+                            entrevistador,
+    
+                            "localidade":
+                            localidade,
+
+                            "data_entrevista":
+                            dados.get("data_entrevista"),
+
+                            "nome_arquivo":
+                            audio_entrevista
+
+                        }
+
+                    )   
+                
 
         print(
             "OK:",
