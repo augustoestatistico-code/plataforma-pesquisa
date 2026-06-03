@@ -723,7 +723,7 @@ def inicializar_dashboard(pathname):
         Input("tipo-mapa", "value"),
     ]
 )
-def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, tipo_mapa):
+def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, tipo_mapa, pergunta_mapa):
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
