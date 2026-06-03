@@ -727,7 +727,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, ti
 
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], []
+        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], [], []
 
     df = carregar_dados(pesquisa_id)
 
@@ -735,7 +735,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, ti
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], []
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], [], []
 
     opcoes_localidade = [
         {"label": x, "value": x}
@@ -887,6 +887,22 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, ti
                 "borderRadius": "18px"
             })
         ]
+    perguntas_mapa_df = pd.read_sql(
+        text("""
+            SELECT name, label
+            FROM perguntas_pesquisa
+            WHERE pesquisa_id = :pesquisa_id
+            AND exibir_dashboard = true
+            ORDER BY id
+        """),
+        engine,
+        params={"pesquisa_id": pesquisa_id}
+    )
+
+    opcoes_pergunta_mapa = [
+        {"label": row["label"], "value": row["name"]}
+        for _, row in perguntas_mapa_df.iterrows()
+    ]
 
     return (
         kpis,
@@ -897,7 +913,8 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, ti
         perguntas,
         audios,
         opcoes_localidade,
-        opcoes_entrevistador
+        opcoes_entrevistador,
+        opcoes_pergunta_mapa
     )
 
 ODK_URL = "https://app.ar7pesquisas.com.br"
