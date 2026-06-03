@@ -158,8 +158,16 @@ for _,pesquisa in pesquisas.iterrows():
                     "IDADE"
                 )
 
-                localidade=dados.get(
-                    "LOCALIDADE"
+                localidade = (
+                    dados.get("LOCALIDADE")
+                    or dados.get("localidade")
+                    or dados.get("bairro")
+                    or dados.get("bairros")
+                    or dados.get("Bairro")
+                    or dados.get("Bairros")
+                    or dados.get("BAIRRO")
+                    or dados.get("BAIRROS")
+                    or "Não informado"
                 )
 
                 entrevistador=dados.get(

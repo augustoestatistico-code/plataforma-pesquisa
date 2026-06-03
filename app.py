@@ -494,6 +494,14 @@ app.layout = html.Div([
                 placeholder="Todos",
                 style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
             ),
+            html.Label("Pergunta no Mapa", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="pergunta-mapa",
+                options=[],
+                value=None,
+                placeholder="Selecione uma pergunta",
+                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+            ),
             html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
             dcc.Dropdown(
                 id="tipo-mapa",
@@ -705,11 +713,13 @@ def inicializar_dashboard(pathname):
         Output("audios-entrevistas", "children"),
         Output("filtro-localidade", "options"),
         Output("filtro-entrevistador", "options"),
+        Output("pergunta-mapa", "options"),
     ],
     [
         Input("pesquisa", "value"),
         Input("filtro-localidade", "value"),
         Input("filtro-entrevistador", "value"),
+        Input("pergunta-mapa", "value"),
         Input("tipo-mapa", "value"),
     ]
 )
