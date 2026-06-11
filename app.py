@@ -98,7 +98,7 @@ app = dash.Dash(
 # =========================
 def get_cliente(cliente_id):
     query = text("""
-        SELECT nome, logo
+        SELECT nome, logo_url
         FROM clientes
         WHERE id = :cliente_id
     """)
@@ -107,9 +107,13 @@ def get_cliente(cliente_id):
         row = conn.execute(query, {"cliente_id": cliente_id}).fetchone()
 
     if row:
-        return {"nome": row[0], "logo": row[1]}
+        logo = row[1] or "/dashboard/assets/logos/sem_logo.png"
+        return {"nome": row[0], "logo": logo}
 
-    return {"nome": "Cliente", "logo": None}
+    return {
+        "nome": "Cliente",
+        "logo": "/dashboard/assets/logos/sem_logo.png"
+    }
 
 
 def lista_pesquisas(cliente_id):
@@ -296,8 +300,7 @@ def pergunta_deve_ignorar(coluna):
 
     return False
 
-
-def gerar_graficos_perguntas(df, pesquisa_id):
+def gerar_graficos_perguntas(df, pesquisa_id, pergunta_selecionada=None):
     perguntas = []
 
     if "dados" not in df.columns:
@@ -324,12 +327,14 @@ def gerar_graficos_perguntas(df, pesquisa_id):
         params={"pesquisa_id": pesquisa_id}
     )
 
-
-
     lista_exibir = set(perguntas_exibir["name"].tolist())
     labels = dict(zip(perguntas_exibir["name"], perguntas_exibir["label"]))
-    ordem_perguntas = perguntas_exibir["name"].tolist()
-    
+
+    if pergunta_selecionada:
+        ordem_perguntas = [pergunta_selecionada.upper()]
+    else:
+        ordem_perguntas = perguntas_exibir["name"].tolist()
+
     for coluna_upper in ordem_perguntas:
 
         coluna_real = None
@@ -343,13 +348,9 @@ def gerar_graficos_perguntas(df, pesquisa_id):
             continue
 
         coluna = coluna_real
-    
         coluna_upper = coluna.upper()
 
         if coluna_upper not in lista_exibir:
-            continue
-
-        if pergunta_deve_ignorar(coluna):
             continue
 
         serie = json_df[coluna].dropna().astype(str).str.strip()
@@ -368,9 +369,6 @@ def gerar_graficos_perguntas(df, pesquisa_id):
             + "%)"
         )
 
-        if len(contagem) > 15:
-            contagem = contagem.head(15)
-
         titulo = labels.get(coluna_upper, coluna)
 
         fig = px.bar(
@@ -384,15 +382,41 @@ def gerar_graficos_perguntas(df, pesquisa_id):
 
         fig = tema_fig(fig)
 
+        tabela_respostas = dash_table.DataTable(
+            data=contagem.to_dict("records"),
+            columns=[
+                {"name": "Resposta", "id": "Resposta"},
+                {"name": "Quantidade", "id": "Quantidade"},
+                {"name": "%", "id": "%"},
+            ],
+            style_table={"overflowX": "auto"},
+            style_header={
+                "backgroundColor": "#020617",
+                "color": "white",
+                "fontWeight": "bold",
+                "border": "1px solid #1f2937"
+            },
+            style_cell={
+                "backgroundColor": "#111827",
+                "color": "#e5e7eb",
+                "border": "1px solid #1f2937",
+                "padding": "8px",
+                "textAlign": "left"
+            },
+            page_size=15
+        )
+
         perguntas.append(
             html.Div([
-                dcc.Graph(figure=fig)
+                dcc.Graph(figure=fig),
+                html.H4("Tabela de respostas", style={"marginTop": "10px"}),
+                tabela_respostas
             ], style={
                 "background": "#111827",
                 "borderRadius": "18px",
                 "border": "1px solid #1f2937",
                 "marginBottom": "18px",
-                "padding": "10px"
+                "padding": "14px"
             })
         )
 
@@ -464,97 +488,131 @@ app.layout = html.Div([
 
     # SIDEBAR
     html.Div([
-        html.Div([
-            html.H2([
-                html.Span("Ipsensus", style={"color": "#1e88ff"}),
-                html.Span(" Survey", style={"color": "white"})
-            ], style={"margin": "0", "fontSize": "24px"}),
+        html.H2([
+            html.Span("Ipsensus", style={"color": "#1e88ff"}),
+            html.Span(" Survey", style={"color": "white"})
+        ], style={"margin": "0", "fontSize": "24px"}),
 
-            html.Div("MENU", style={
-                "color": "#94a3b8",
-                "fontSize": "13px",
-                "marginTop": "30px",
-                "marginBottom": "12px"
-            }),
+        html.Div("MENU", style={
+            "color": "#94a3b8",
+            "fontSize": "13px",
+            "marginTop": "30px",
+            "marginBottom": "12px"
+        }),
 
-            html.Div("📊 Visão Geral", style={
-                "background": "#2563eb",
-                "padding": "12px",
-                "borderRadius": "8px",
-                "marginBottom": "10px",
-                "fontWeight": "bold"
-            }),
+        html.A("📊 Visão Geral", href="#visao-geral", style={
+            "display": "block",
+            "background": "#2563eb",
+            "padding": "12px",
+            "borderRadius": "8px",
+            "marginBottom": "10px",
+            "fontWeight": "bold",
+            "color": "white",
+            "textDecoration": "none"
+        }),
 
-            html.Div("📝 Entrevistas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("🗺️ Mapas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("📋 Perguntas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("👥 Entrevistadores", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("📄 Relatórios", style={"padding": "10px", "color": "#cbd5e1"}),
+        html.A("📝 Entrevistas", href="#entrevistas", style={
+            "display": "block",
+            "padding": "10px",
+            "color": "#cbd5e1",
+            "textDecoration": "none"
+        }),
 
-            html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
+        html.A("🗺️ Mapas", href="#mapas", style={
+            "display": "block",
+            "padding": "10px",
+            "color": "#cbd5e1",
+            "textDecoration": "none"
+        }),
 
-            html.Div("FILTROS", style={
-                "color": "#94a3b8",
-                "fontSize": "13px",
-                "marginBottom": "12px"
-            }),
+        html.A("📋 Perguntas", href="#perguntas", style={
+            "display": "block",
+            "padding": "10px",
+            "color": "#cbd5e1",
+            "textDecoration": "none"
+        }),
 
-            html.Label("Pesquisa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="pesquisa",
-                options=[],
-                value=None,
-                placeholder="Selecione",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
+        html.A("👥 Entrevistadores", href="#entrevistadores", style={
+            "display": "block",
+            "padding": "10px",
+            "color": "#cbd5e1",
+            "textDecoration": "none"
+        }),
 
-            html.Label("Localidade", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="filtro-localidade",
-                options=[],
-                value=None,
-                placeholder="Todas",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
+        html.A("📄 Relatórios", href="#relatorios", style={
+            "display": "block",
+            "padding": "10px",
+            "color": "#cbd5e1",
+            "textDecoration": "none"
+        }),
 
-            html.Label("Entrevistador", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="filtro-entrevistador",
-                options=[],
-                value=None,
-                placeholder="Todos",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.Label("Pergunta no Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="pergunta-mapa",
-                options=[],
-                value=None,
-                placeholder="Selecione uma pergunta",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="tipo-mapa",
-                options=[
-                    {"label": "Mapa de Pontos", "value": "pontos"},
-                    {"label": "Mapa de Calor", "value": "calor"},
-                ],
-                value="pontos",
-                clearable=False,
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.A("Sair", href="/logout", style={
-                "display": "block",
-                "marginTop": "25px",
-                "color": "white",
-                "background": "#dc2626",
-                "padding": "10px",
-                "borderRadius": "8px",
-                "textAlign": "center",
-                "textDecoration": "none"
-            }),
-        ])
+        html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
+
+        html.Div("FILTROS", style={
+            "color": "#94a3b8",
+            "fontSize": "13px",
+            "marginBottom": "12px"
+        }),
+
+        html.Label("Pesquisa", style={"fontSize": "13px"}),
+        dcc.Dropdown(
+            id="pesquisa",
+            options=[],
+            value=None,
+            placeholder="Selecione",
+            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+        ),
+
+        html.Label("Localidade", style={"fontSize": "13px"}),
+        dcc.Dropdown(
+            id="filtro-localidade",
+            options=[],
+            value=None,
+            placeholder="Todas",
+            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+        ),
+
+        html.Label("Entrevistador", style={"fontSize": "13px"}),
+        dcc.Dropdown(
+            id="filtro-entrevistador",
+            options=[],
+            value=None,
+            placeholder="Todos",
+            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+        ),
+
+        html.Label("Pergunta para análise", style={"fontSize": "13px"}),
+        dcc.Dropdown(
+            id="pergunta-mapa",
+            options=[],
+            value=None,
+            placeholder="Selecione uma pergunta",
+            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+        ),
+
+        html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
+        dcc.Dropdown(
+            id="tipo-mapa",
+            options=[
+                {"label": "Mapa de Pontos", "value": "pontos"},
+                {"label": "Mapa de Calor", "value": "calor"},
+            ],
+            value="pontos",
+            clearable=False,
+            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+        ),
+
+        html.A("Sair", href="/logout", style={
+            "display": "block",
+            "marginTop": "25px",
+            "color": "white",
+            "background": "#dc2626",
+            "padding": "10px",
+            "borderRadius": "8px",
+            "textAlign": "center",
+            "textDecoration": "none"
+        }),
+
     ], style={
         "position": "fixed",
         "left": "0",
@@ -571,10 +629,9 @@ app.layout = html.Div([
     # CONTEÚDO PRINCIPAL
     html.Div([
 
-        # TOPO
         html.Div([
             html.Div([
-                html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+                html.H2("Acompanhamento em Tempo Real", id="visao-geral", style={"margin": "0"}),
                 html.Div("Dados atualizados automaticamente", style={
                     "color": "#94a3b8",
                     "fontSize": "13px",
@@ -582,7 +639,15 @@ app.layout = html.Div([
                 }),
             ]),
 
-            html.Div(id="cliente-header", style={"color": "#cbd5e1"})
+            html.Div([
+                html.Div(id="cliente-header", style={"color": "#cbd5e1"}),
+                html.Div(id="pesquisa-header", style={
+                    "color": "#94a3b8",
+                    "fontSize": "12px",
+                    "marginTop": "6px",
+                    "textAlign": "right"
+                })
+            ])
         ], style={
             "display": "flex",
             "justifyContent": "space-between",
@@ -590,7 +655,6 @@ app.layout = html.Div([
             "marginBottom": "22px"
         }),
 
-        # KPIS
         html.Div(id="kpis", style={
             "display": "grid",
             "gridTemplateColumns": "repeat(4, 1fr)",
@@ -598,7 +662,6 @@ app.layout = html.Div([
             "marginBottom": "20px"
         }),
 
-        # GRÁFICOS SUPERIORES
         html.Div([
             html.Div([dcc.Graph(id="grafico-sexo")], style={
                 "background": "#111827",
@@ -606,7 +669,6 @@ app.layout = html.Div([
                 "border": "1px solid #1f2937",
                 "padding": "10px"
             }),
-
             html.Div([dcc.Graph(id="grafico-idade")], style={
                 "background": "#111827",
                 "borderRadius": "14px",
@@ -620,9 +682,8 @@ app.layout = html.Div([
             "marginBottom": "20px"
         }),
 
-        # MAPA + TABELA
         html.Div([
-            html.Div([dcc.Graph(id="mapa-gps")], style={
+            html.Div([dcc.Graph(id="mapa-gps")], id="mapas", style={
                 "background": "#111827",
                 "borderRadius": "14px",
                 "border": "1px solid #1f2937",
@@ -630,7 +691,7 @@ app.layout = html.Div([
             }),
 
             html.Div([
-                html.H3("Desempenho por Entrevistador", style={"marginTop": "0"}),
+                html.H3("Desempenho por Entrevistador", id="entrevistadores", style={"marginTop": "0"}),
                 html.Div(id="tabela-entrevistador")
             ], style={
                 "background": "#111827",
@@ -645,28 +706,58 @@ app.layout = html.Div([
             "marginBottom": "20px"
         }),
 
-        # PERGUNTAS
-            html.Div([
-                html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
-                html.Div(id="perguntas-dinamicas")
-            ]),
+        html.Div([
+            html.H2("Resultados das Perguntas", id="perguntas", style={"marginBottom": "16px"}),
+            html.Div(id="perguntas-dinamicas")
+        ]),
 
-        # AUDITORIA DE ÁUDIOS
-            html.Div([
-                html.H2("Auditoria de Áudios", style={
-                    "marginTop": "30px",
-                    "marginBottom": "16px"
-                }),
-
-                html.Div(id="audios-entrevistas")
-
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "20px",
-                "marginTop": "20px"
+        html.Div([
+            html.H2("Entrevistas/ Auditoria", id="entrevistas", style={
+                "marginTop": "30px",
+                "marginBottom": "16px"
             }),
+            html.H3("Lista de Entrevistas"),
+            html.Div(id="tabela-entrevistas", style={"marginBottom": "25px"}),
+
+            html.H3("Auditoria de Áudios"),
+            html.Div(id="audios-entrevistas")
+        ], style={
+            "background": "#111827",
+            "borderRadius": "14px",
+            "border": "1px solid #1f2937",
+            "padding": "20px",
+            "marginTop": "20px"
+        }),
+
+        html.Div([
+            html.H2("Relatórios", id="relatorios", style={
+                "marginTop": "30px",
+                "marginBottom": "16px"
+            }),
+        html.Div([
+            html.A(
+                "📥 Exportar base da pesquisa em Excel",
+                id="link-exportar-excel",
+                href="#",
+                target="_blank",
+                style={
+                    "display": "inline-block",
+                    "background": "#2563eb",
+                    "color": "white",
+                    "padding": "12px 18px",
+                    "borderRadius": "10px",
+                    "textDecoration": "none",
+                    "fontWeight": "bold"
+                }
+            )
+        ], style={
+            "background": "#111827",
+            "borderRadius": "14px",
+            "border": "1px solid #1f2937",
+            "padding": "20px",
+            "color": "#cbd5e1"
+        })
+        ])
 
     ], style={
         "marginLeft": "260px",
@@ -678,8 +769,7 @@ app.layout = html.Div([
     })
 
 ])
-
-
+        
 # =========================
 # CALLBACK PESQUISAS
 # =========================
@@ -715,11 +805,21 @@ def inicializar_dashboard(pathname):
         ) if logo else None,
 
         html.Div([
-            html.Div(f"Cliente: {cliente['nome']}", style={"fontWeight": "bold"}),
-            html.Div(
-                "Dashboard de pesquisas em andamento",
-                style={"fontSize": "12px", "color": "#94a3b8"}
-            )
+            html.Div(f"Cliente: {cliente['nome']}", style={
+                "fontWeight": "bold",
+                "fontSize": "15px"
+            }),
+            html.Div("Ipsensus Survey", style={
+                "fontSize": "13px",
+                "color": "#38bdf8",
+                "fontWeight": "bold",
+                "marginTop": "2px"
+            }),
+            html.Div("Dashboard de pesquisas em andamento", style={
+                "fontSize": "12px",
+                "color": "#94a3b8",
+                "marginTop": "2px"
+            })
         ])
     ], style={
         "display": "flex",
@@ -740,11 +840,13 @@ def inicializar_dashboard(pathname):
         Output("grafico-idade", "figure"),
         Output("mapa-gps", "figure"),
         Output("tabela-entrevistador", "children"),
+        Output("tabela-entrevistas", "children"),
         Output("perguntas-dinamicas", "children"),
         Output("audios-entrevistas", "children"),
         Output("filtro-localidade", "options"),
         Output("filtro-entrevistador", "options"),
         Output("pergunta-mapa", "options"),
+        Output("pesquisa-header", "children"),
     ],
     [
         Input("pesquisa", "value"),
@@ -758,7 +860,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
     
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], [], []
+        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", "", [], [], [], ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -766,7 +868,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], [], []
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", "", [], [], [], ""
 
     opcoes_localidade = [
         {"label": x, "value": x}
@@ -788,7 +890,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_vazio = tema_fig(px.bar(title="Sem dados para o filtro selecionado"))
         return [
             card("Total", "0", "Filtro sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", opcoes_localidade, opcoes_entrevistador, []
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", "", opcoes_localidade, opcoes_entrevistador, [], ""
 
     total = len(df)
     entrevistadores = df["entrevistador"].nunique()
@@ -868,6 +970,46 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         },
         page_size=10
     )
+
+    tabela_entrevistas = dash_table.DataTable(
+        data=df[[
+            "id",
+            "submission_id",
+            "entrevistador",
+            "localidade",
+            "sexo",
+            "idade"
+        ]].head(300).to_dict("records"),
+        columns=[
+            {"name": "ID", "id": "id"},
+            {"name": "Submission", "id": "submission_id"},
+            {"name": "Entrevistador", "id": "entrevistador"},
+            {"name": "Localidade", "id": "localidade"},
+            {"name": "Sexo", "id": "sexo"},
+            {"name": "Idade", "id": "idade"},
+        ],
+        page_size=15,
+        filter_action="native",
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_header={
+            "backgroundColor": "#020617",
+            "color": "white",
+            "fontWeight": "bold",
+            "border": "1px solid #1f2937"
+        },
+        style_cell={
+            "backgroundColor": "#111827",
+            "color": "#e5e7eb",
+            "border": "1px solid #1f2937",
+            "padding": "8px",
+            "fontSize": "12px",
+            "textAlign": "left",
+            "maxWidth": "220px",
+            "overflow": "hidden",
+            "textOverflow": "ellipsis"
+        },
+    )    
 
     gps_df = extrair_gps(df)
 
@@ -951,7 +1093,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
             margin=dict(l=0, r=0, t=50, b=0)
         )
 
-    perguntas = gerar_graficos_perguntas(df, pesquisa_id)
+    perguntas = gerar_graficos_perguntas(df, pesquisa_id, pergunta_mapa)
     audios = carregar_audios(pesquisa_id)
 
     if not perguntas:
@@ -978,25 +1120,51 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         {"label": row["label"], "value": row["name"]}
         for _, row in perguntas_mapa_df.iterrows()
     ]
+    
+    pesquisa_nome = ""
 
+    try:
+        pesquisa_nome = [
+            opt["label"]
+            for opt in lista_pesquisas(session.get("cliente_id"))
+            if opt["value"] == pesquisa_id
+        ][0]
+    except:
+        pesquisa_nome = f"Pesquisa ID {pesquisa_id}"
+
+    pesquisa_header = html.Div([
+        html.Div(f"Pesquisa: {pesquisa_nome}"),
+        html.Div(f"Entrevistas filtradas: {total}")
+    ])
     return (
         kpis,
         fig_sexo,
         fig_idade,
         fig_mapa,
         tabela_ent,
+        tabela_entrevistas,
         perguntas,
         audios,
         opcoes_localidade,
         opcoes_entrevistador,
-        opcoes_pergunta_mapa
+        opcoes_pergunta_mapa,
+        pesquisa_header
     )
 
 ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"
 
+@app.callback(
+    Output("link-exportar-excel", "href"),
+    Input("pesquisa", "value")
+)
+def atualizar_link_excel(pesquisa_id):
 
+    if not pesquisa_id:
+        return "#"
+
+    return f"/exportar_excel/{pesquisa_id}"
 # =========================
 # AUDIO ENDPOINT
 # =========================
@@ -1077,6 +1245,44 @@ def ouvir_audio(pesquisa_id, submission_id, nome_arquivo):
     return Response(
         audio_mp3,
         mimetype="audio/mpeg"
+    )
+# =========================
+# EXPORTAR EXCEL
+# =========================
+@server.route("/exportar_excel/<int:pesquisa_id>")
+def exportar_excel(pesquisa_id):
+
+    if "cliente_id" not in session:
+        return "Não autorizado", 403
+
+    df = carregar_dados(pesquisa_id)
+
+    if df.empty:
+        return "Sem dados", 404
+
+    dados_json = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_json)
+
+    df_export = pd.concat(
+        [df.drop(columns=["dados"]), json_df],
+        axis=1
+    )
+
+    import io
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_export.to_excel(writer, index=False, sheet_name="base")
+
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=pesquisa_{pesquisa_id}.xlsx"
+        }
     )
 
 # =========================
