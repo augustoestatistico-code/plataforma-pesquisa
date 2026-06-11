@@ -237,6 +237,11 @@ def tema_fig(fig):
         legend=dict(bgcolor="rgba(0,0,0,0)")
     )
 
+    fig.update_xaxes(gridcolor="#1f2937")
+    fig.update_yaxes(gridcolor="#1f2937")
+
+    return fig
+
 def cor_resposta_mapa(valor):
 
     valor = str(valor).strip().lower()
