@@ -4,7 +4,6 @@ import json
 from requests.auth import HTTPBasicAuth
 from sqlalchemy import create_engine, text
 import os
-PESQUISA_ID = os.getenv("PESQUISA_ID")
 
 # ======================
 # CONFIG
@@ -14,18 +13,9 @@ ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-
-print("DATABASE_URL =", repr(DATABASE_URL))
-
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL está vazia. Defina com: set DATABASE_URL=sua_url")
-
-if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
-    raise ValueError(f"DATABASE_URL inválida: {DATABASE_URL}")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
-
 
 # ======================
 # BUSCAR TODAS PÁGINAS ODK
@@ -96,11 +86,6 @@ ORDER BY id
 
 """,engine)
 
-if PESQUISA_ID:
-    pesquisas = pesquisas[
-        pesquisas["id"] == int(PESQUISA_ID)
-    ]
-    
 print("\nPESQUISAS ENCONTRADAS:")
 print(
     pesquisas[
@@ -173,22 +158,12 @@ for _,pesquisa in pesquisas.iterrows():
                     "IDADE"
                 )
 
-                localidade = (
-                        dados.get("LOCALIDADE")
-                        or dados.get("localidade")
-                        or dados.get("bairros")
-                        or dados.get("bairro")
-                        or dados.get("BAIRRO")
-                        or dados.get("ZONA")
-                        or dados.get("zona")
-                        or "Não informado"
-                    )
+                localidade=dados.get(
+                    "LOCALIDADE"
+                )
 
                 entrevistador=dados.get(
                     "ENTREVISTADOR"
-                )
-                audio_entrevista = dados.get(
-                    "audio_entrevista"
                 )
 
                 conn.execute(
@@ -266,65 +241,6 @@ for _,pesquisa in pesquisas.iterrows():
                     }
 
                 )
-
-                if audio_entrevista:
-
-                    conn.execute(
-
-                        text("""
-
-                            INSERT INTO audios_entrevistas(
-
-                                pesquisa_id,
-                                submission_id,
-                                entrevistador,
-                                localidade,
-                                data_entrevista,
-                                nome_arquivo
-
-                            )
-
-                            VALUES(
-
-                                :pesquisa_id,
-                                :submission_id,
-                                :entrevistador,
-                                :localidade,
-                                :data_entrevista,
-                                :nome_arquivo
-
-                            )
-
-                            ON CONFLICT
-                            (submission_id, nome_arquivo)
-
-                            DO NOTHING
-
-                        """),
-
-                        {
-
-                            "pesquisa_id":
-                            int(pesquisa["id"]),
-                            "submission_id":
-                            dados.get("__id"),
-
-                            "entrevistador":
-                            entrevistador,
-    
-                            "localidade":
-                            localidade,
-
-                            "data_entrevista":
-                            dados.get("data_entrevista"),
-
-                            "nome_arquivo":
-                            audio_entrevista
-
-                        }
-
-                    )   
-                
 
         print(
             "OK:",

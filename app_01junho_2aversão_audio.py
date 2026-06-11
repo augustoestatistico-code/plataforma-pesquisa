@@ -184,7 +184,6 @@ def extrair_gps(df):
         try:
             if lat and lon:
                 pontos.append({
-                    "submission_id": row.get("submission_id"),
                     "lat": float(lat),
                     "lon": float(lon),
                     "localidade": row.get("localidade", ""),
@@ -232,36 +231,6 @@ def tema_fig(fig):
         margin=dict(l=35, r=25, t=55, b=35),
         legend=dict(bgcolor="rgba(0,0,0,0)")
     )
-
-def cor_resposta_mapa(valor):
-
-    valor = str(valor).strip().lower()
-
-    mapa = {
-        "aprova": "#16a34a",
-        "desaprova": "#dc2626",
-        "ótima": "#15803d",
-        "otima": "#15803d",
-        "boa": "#22c55e",
-        "regular": "#facc15",
-        "ruim": "#f97316",
-        "péssima": "#b91c1c",
-        "pessima": "#b91c1c",
-        "sim": "#16a34a",
-        "não": "#dc2626",
-        "nao": "#dc2626",
-        "talvez": "#facc15",
-        "indeciso": "#9ca3af",
-        "indeciso ": "#9ca3af",
-        "não sabe": "#9ca3af",
-        "nao sabe": "#9ca3af",
-        "ns/nr": "#9ca3af",
-        "nenhum": "#6b7280",
-        "branco/nulo": "#6b7280",
-    }
-
-    return mapa.get(valor, "#3b82f6")
-
     fig.update_xaxes(gridcolor="#1f2937")
     fig.update_yaxes(gridcolor="#1f2937")
     return fig
@@ -525,25 +494,7 @@ app.layout = html.Div([
                 placeholder="Todos",
                 style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
             ),
-            html.Label("Pergunta no Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="pergunta-mapa",
-                options=[],
-                value=None,
-                placeholder="Selecione uma pergunta",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="tipo-mapa",
-                options=[
-                    {"label": "Mapa de Pontos", "value": "pontos"},
-                    {"label": "Mapa de Calor", "value": "calor"},
-                ],
-                value="pontos",
-                clearable=False,
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
+
             html.A("Sair", href="/logout", style={
                 "display": "block",
                 "marginTop": "25px",
@@ -732,6 +683,7 @@ def inicializar_dashboard(pathname):
 
 # =========================
 # CALLBACK DASHBOARD
+# =========================
 
 @app.callback(
     [
@@ -742,23 +694,16 @@ def inicializar_dashboard(pathname):
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
         Output("audios-entrevistas", "children"),
-        Output("filtro-localidade", "options"),
-        Output("filtro-entrevistador", "options"),
-        Output("pergunta-mapa", "options"),
     ],
-    [
-        Input("pesquisa", "value"),
-        Input("filtro-localidade", "value"),
-        Input("filtro-entrevistador", "value"),
-        Input("pergunta-mapa", "value"),
-        Input("tipo-mapa", "value"),
-    ]
-)
-def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pergunta_mapa, tipo_mapa):
+
     
+    Input("pesquisa", "value")
+)
+def atualizar_dashboard(pesquisa_id):
+
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], [], []
+        return [], fig_vazio, fig_vazio, fig_vazio, "", "", ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -766,31 +711,10 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], [], []
-
-    opcoes_localidade = [
-        {"label": x, "value": x}
-        for x in sorted(df["localidade"].dropna().unique())
-    ]
-
-    opcoes_entrevistador = [
-        {"label": x, "value": x}
-        for x in sorted(df["entrevistador"].dropna().unique())
-    ]
-
-    if filtro_localidade:
-        df = df[df["localidade"] == filtro_localidade]
-
-    if filtro_entrevistador:
-        df = df[df["entrevistador"] == filtro_entrevistador]
-
-    if df.empty:
-        fig_vazio = tema_fig(px.bar(title="Sem dados para o filtro selecionado"))
-        return [
-            card("Total", "0", "Filtro sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", opcoes_localidade, opcoes_entrevistador, []
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", ""
 
     total = len(df)
+    localidades = df["localidade"].nunique()
     entrevistadores = df["entrevistador"].nunique()
 
     masc = int((df["sexo"] == "Masculino").sum())
@@ -799,8 +723,9 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
     masc_pct = round((masc / total) * 100, 1) if total else 0
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
+
     kpis = [
-        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra filtrada", "#1d4ed8"),
+        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra realizada", "#1d4ed8"),
         card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
         card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
         card("Entrevistadores", entrevistadores, "Equipe em campo", "#7e22ce"),
@@ -808,7 +733,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
 
     sexo_df = df["sexo"].value_counts().reset_index()
     sexo_df.columns = ["Sexo", "Quantidade"]
-
     fig_sexo = px.pie(
         sexo_df,
         names="Sexo",
@@ -845,6 +769,27 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
     )
     fig_idade = tema_fig(fig_idade)
 
+    loc_df = df["localidade"].value_counts().reset_index()
+    loc_df.columns = ["Localidade", "Quantidade"]
+    loc_df["%"] = (loc_df["Quantidade"] / total * 100).round(1)
+    loc_df["Texto"] = (
+        loc_df["Quantidade"].astype(str)
+        + " ("
+        + loc_df["%"].astype(str)
+        + "%)"
+    )
+    loc_df = loc_df.sort_values("Quantidade", ascending=True)
+
+    fig_localidade = px.bar(
+        loc_df,
+        x="Quantidade",
+        y="Localidade",
+        orientation="h",
+        text="Texto",
+        title="Entrevistas por Localidade"
+    )
+    fig_localidade = tema_fig(fig_localidade)
+
     ent_df = df["entrevistador"].value_counts().reset_index()
     ent_df.columns = ["Entrevistador", "Quantidade"]
     ent_df["%"] = (ent_df["Quantidade"] / total * 100).round(1)
@@ -869,79 +814,25 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         page_size=10
     )
 
+
     gps_df = extrair_gps(df)
 
-    if not gps_df.empty and pergunta_mapa:
-        mapa_respostas = {}
-
-        for _, row in df.iterrows():
-            dados = normalizar_json(row.get("dados"))
-            submission = row.get("submission_id")
-            mapa_respostas[submission] = dados.get(pergunta_mapa)
-
-        gps_df["resposta_mapa"] = gps_df["submission_id"].map(mapa_respostas)
-
     if gps_df.empty:
-
         fig_mapa = tema_fig(
             px.scatter(title="Sem GPS disponível nesta pesquisa")
         )
-
     else:
-
-        if tipo_mapa == "calor":
-
-            fig_mapa = px.density_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                radius=35,
-                zoom=12,
-                height=650,
-                title="Mapa de Calor das Entrevistas"
-            )
-
-        elif pergunta_mapa and "resposta_mapa" in gps_df.columns:
-
-            gps_df["resposta_mapa"] = gps_df["resposta_mapa"].fillna("Não informado")
-
-            fig_mapa = px.scatter_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                color="resposta_mapa",
-
-                color_discrete_map={
-                    resposta: cor_resposta_mapa(resposta)
-                    for resposta in gps_df["resposta_mapa"].unique()
-                },
-
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy",
-                    "resposta_mapa"
-                ],
-                zoom=12,
-                height=650,
-                title="Mapa por Resposta da Pergunta"
-            )
-        else:
-
-            fig_mapa = px.scatter_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy"
-                ],
-                zoom=12,
-                height=650,
-                size=[14] * len(gps_df),
-                title="Mapa de Pontos das Entrevistas"
-            )
+        fig_mapa = px.scatter_mapbox(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            hover_name="localidade",
+            hover_data=["entrevistador", "accuracy"],
+            zoom=12,
+            height=650,
+            size=[14] * len(gps_df),
+            title="Mapa das Entrevistas"
+        )
 
         fig_mapa.update_layout(
             mapbox_style="open-street-map",
@@ -952,8 +843,9 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         )
 
     perguntas = gerar_graficos_perguntas(df, pesquisa_id)
-    audios = carregar_audios(pesquisa_id)
 
+    audios = carregar_audios(pesquisa_id)
+    
     if not perguntas:
         perguntas = [
             html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
@@ -962,22 +854,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
                 "borderRadius": "18px"
             })
         ]
-    perguntas_mapa_df = pd.read_sql(
-        text("""
-            SELECT UPPER(name) AS name, label
-            FROM perguntas_pesquisa
-            WHERE pesquisa_id = :pesquisa_id
-            AND exibir_dashboard = true
-            ORDER BY id
-        """),
-        engine,
-        params={"pesquisa_id": pesquisa_id}
-    )
-
-    opcoes_pergunta_mapa = [
-        {"label": row["label"], "value": row["name"]}
-        for _, row in perguntas_mapa_df.iterrows()
-    ]
 
     return (
         kpis,
@@ -986,12 +862,8 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_mapa,
         tabela_ent,
         perguntas,
-        audios,
-        opcoes_localidade,
-        opcoes_entrevistador,
-        opcoes_pergunta_mapa
+        audios
     )
-
 ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"

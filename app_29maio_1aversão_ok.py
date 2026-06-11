@@ -5,12 +5,10 @@ from sqlalchemy import create_engine, text
 import dash
 from dash import dcc, html, Input, Output, dash_table
 import plotly.express as px
-from flask import Flask, request, session, redirect, Response
+from flask import Flask, request, session, redirect
 import subprocess
 import sys
-import requests
-from requests.auth import HTTPBasicAuth
-import urllib.parse
+
 
 # =========================
 # CONFIG
@@ -184,7 +182,6 @@ def extrair_gps(df):
         try:
             if lat and lon:
                 pontos.append({
-                    "submission_id": row.get("submission_id"),
                     "lat": float(lat),
                     "lon": float(lon),
                     "localidade": row.get("localidade", ""),
@@ -232,36 +229,6 @@ def tema_fig(fig):
         margin=dict(l=35, r=25, t=55, b=35),
         legend=dict(bgcolor="rgba(0,0,0,0)")
     )
-
-def cor_resposta_mapa(valor):
-
-    valor = str(valor).strip().lower()
-
-    mapa = {
-        "aprova": "#16a34a",
-        "desaprova": "#dc2626",
-        "ótima": "#15803d",
-        "otima": "#15803d",
-        "boa": "#22c55e",
-        "regular": "#facc15",
-        "ruim": "#f97316",
-        "péssima": "#b91c1c",
-        "pessima": "#b91c1c",
-        "sim": "#16a34a",
-        "não": "#dc2626",
-        "nao": "#dc2626",
-        "talvez": "#facc15",
-        "indeciso": "#9ca3af",
-        "indeciso ": "#9ca3af",
-        "não sabe": "#9ca3af",
-        "nao sabe": "#9ca3af",
-        "ns/nr": "#9ca3af",
-        "nenhum": "#6b7280",
-        "branco/nulo": "#6b7280",
-    }
-
-    return mapa.get(valor, "#3b82f6")
-
     fig.update_xaxes(gridcolor="#1f2937")
     fig.update_yaxes(gridcolor="#1f2937")
     return fig
@@ -398,286 +365,93 @@ def gerar_graficos_perguntas(df, pesquisa_id):
 
     return perguntas
 
-# =========================
-# ÁUDIOS
-# =========================
-def carregar_audios(pesquisa_id):
 
-    try:
-        sql = """
-            SELECT
-                pesquisa_id,
-                submission_id,
-                entrevistador,
-                localidade,
-                data_entrevista,
-                nome_arquivo
-            FROM audios_entrevistas
-            WHERE pesquisa_id = %(pesquisa_id)s
-            ORDER BY id DESC
-            LIMIT 100
-        """
-
-        df = pd.read_sql(sql, engine, params={"pesquisa_id": pesquisa_id})
-
-        if df.empty:
-            return html.Div("Nenhum áudio disponível nesta pesquisa.", style={"color": "#9ca3af"})
-
-        linhas = []
-
-        for _, row in df.iterrows():
-            audio_src = f"/audio/{row['pesquisa_id']}/{row['submission_id']}/{row['nome_arquivo']}"
-
-            linhas.append(html.Tr([
-                html.Td(row["entrevistador"]),
-                html.Td(row["localidade"]),
-                html.Td(str(row["data_entrevista"])),
-                html.Td( html.Audio(
-                            src=audio_src,
-                            controls=True,
-                            style={"width": "300px"}
-                        ))
-            ]))
-
-        return html.Table([
-            html.Thead(html.Tr([
-                html.Th("Entrevistador"),
-                html.Th("Localidade"),
-                html.Th("Data"),
-                html.Th("Áudio")
-            ])),
-            html.Tbody(linhas)
-        ], style={"width": "100%", "color": "white"})
-
-    except Exception as e:
-        return html.Div(f"Erro ao carregar áudios: {e}")
-    
 # =========================
 # LAYOUT
-# =========================
-
-# =========================
-# LAYOUT POWER BI
 # =========================
 app.layout = html.Div([
     dcc.Location(id="url"),
 
-    # SIDEBAR
     html.Div([
         html.Div([
-            html.H2([
-                html.Span("Ipsensus", style={"color": "#1e88ff"}),
-                html.Span(" Survey", style={"color": "white"})
-            ], style={"margin": "0", "fontSize": "24px"}),
+            html.H2("📊 Dashboard Pesquisa", style={"margin": "0"}),
+            html.Div(id="cliente-header", style={"color": "#94a3b8", "marginTop": "6px"}),
+        ]),
 
-            html.Div("MENU", style={
-                "color": "#94a3b8",
-                "fontSize": "13px",
-                "marginTop": "30px",
-                "marginBottom": "12px"
-            }),
-
-            html.Div("📊 Visão Geral", style={
-                "background": "#2563eb",
-                "padding": "12px",
-                "borderRadius": "8px",
-                "marginBottom": "10px",
-                "fontWeight": "bold"
-            }),
-
-            html.Div("📝 Entrevistas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("🗺️ Mapas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("📋 Perguntas", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("👥 Entrevistadores", style={"padding": "10px", "color": "#cbd5e1"}),
-            html.Div("📄 Relatórios", style={"padding": "10px", "color": "#cbd5e1"}),
-
-            html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
-
-            html.Div("FILTROS", style={
-                "color": "#94a3b8",
-                "fontSize": "13px",
-                "marginBottom": "12px"
-            }),
-
-            html.Label("Pesquisa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="pesquisa",
-                options=[],
-                value=None,
-                placeholder="Selecione",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-
-            html.Label("Localidade", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="filtro-localidade",
-                options=[],
-                value=None,
-                placeholder="Todas",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-
-            html.Label("Entrevistador", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="filtro-entrevistador",
-                options=[],
-                value=None,
-                placeholder="Todos",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.Label("Pergunta no Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="pergunta-mapa",
-                options=[],
-                value=None,
-                placeholder="Selecione uma pergunta",
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
-            html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="tipo-mapa",
-                options=[
-                    {"label": "Mapa de Pontos", "value": "pontos"},
-                    {"label": "Mapa de Calor", "value": "calor"},
-                ],
-                value="pontos",
-                clearable=False,
-                style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
-            ),
+        html.Div([
             html.A("Sair", href="/logout", style={
-                "display": "block",
-                "marginTop": "25px",
                 "color": "white",
                 "background": "#dc2626",
-                "padding": "10px",
-                "borderRadius": "8px",
-                "textAlign": "center",
+                "padding": "10px 18px",
+                "borderRadius": "10px",
                 "textDecoration": "none"
-            }),
+            })
         ])
     ], style={
-        "position": "fixed",
-        "left": "0",
-        "top": "0",
-        "bottom": "0",
-        "width": "260px",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center",
+        "padding": "22px 28px",
         "background": "#020617",
-        "padding": "24px 16px",
-        "borderRight": "1px solid #1f2937",
-        "color": "white",
-        "overflowY": "auto"
+        "borderBottom": "1px solid #1f2937"
     }),
 
-    # CONTEÚDO PRINCIPAL
     html.Div([
+        html.Label("Selecione a pesquisa", style={"fontWeight": "bold"}),
+        dcc.Dropdown(
+            id="pesquisa",
+            options=[],
+            value=None,
+            placeholder="Escolha uma pesquisa",
+            style={"color": "#111827", "marginTop": "8px"}
+        )
+    ], style={"padding": "22px 28px"}),
 
-        # TOPO
-        html.Div([
-            html.Div([
-                html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
-                html.Div("Dados atualizados automaticamente", style={
-                    "color": "#94a3b8",
-                    "fontSize": "13px",
-                    "marginTop": "4px"
-                }),
-            ]),
+    html.Div(id="kpis", style={
+        "display": "grid",
+        "gridTemplateColumns": "repeat(4, 1fr)",
+        "gap": "18px",
+        "padding": "0 28px 22px"
+    }),
 
-            html.Div(id="cliente-header", style={"color": "#cbd5e1"})
-        ], style={
-            "display": "flex",
-            "justifyContent": "space-between",
-            "alignItems": "center",
-            "marginBottom": "22px"
-        }),
-
-        # KPIS
-        html.Div(id="kpis", style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(4, 1fr)",
-            "gap": "18px",
-            "marginBottom": "20px"
-        }),
-
-        # GRÁFICOS SUPERIORES
-        html.Div([
-            html.Div([dcc.Graph(id="grafico-sexo")], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
-            }),
-
-            html.Div([dcc.Graph(id="grafico-idade")], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
-            }),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "1fr 1fr",
-            "gap": "18px",
-            "marginBottom": "20px"
-        }),
-
-        # MAPA + TABELA
-        html.Div([
-            html.Div([dcc.Graph(id="mapa-gps")], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
-            }),
-
-            html.Div([
-                html.H3("Desempenho por Entrevistador", style={"marginTop": "0"}),
-                html.Div(id="tabela-entrevistador")
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "18px"
-            }),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "1.4fr 1fr",
-            "gap": "18px",
-            "marginBottom": "20px"
-        }),
-
-        # PERGUNTAS
-            html.Div([
-                html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
-                html.Div(id="perguntas-dinamicas")
-            ]),
-
-        # AUDITORIA DE ÁUDIOS
-            html.Div([
-                html.H2("Auditoria de Áudios", style={
-                    "marginTop": "30px",
-                    "marginBottom": "16px"
-                }),
-
-                html.Div(id="audios-entrevistas")
-
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "20px",
-                "marginTop": "20px"
-            }),
-
+    html.Div([
+        dcc.Graph(id="grafico-sexo"),
+        dcc.Graph(id="grafico-idade"),
     ], style={
-        "marginLeft": "260px",
-        "padding": "24px",
-        "background": "#0f172a",
-        "minHeight": "100vh",
-        "color": "#e5e7eb",
-        "fontFamily": "Arial, sans-serif"
-    })
+        "display": "grid",
+        "gridTemplateColumns": "1fr 1fr",
+        "gap": "18px",
+        "padding": "0 28px 22px"
+    }),
+    
+    html.Div([
+    dcc.Graph(id="mapa-gps")
+    ], style={"padding": "0 28px 22px"}),
 
-])
+
+    html.Div([
+        html.Div([
+            html.H3("Produção por Entrevistador"),
+            html.Div(id="tabela-entrevistador")
+        ], style={
+            "background": "#111827",
+            "padding": "20px",
+            "borderRadius": "18px",
+            "border": "1px solid #1f2937"
+        })
+    ], style={"padding": "0 28px 22px"}),
+
+    html.Div([
+        html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
+        html.Div(id="perguntas-dinamicas")
+    ], style={"padding": "0 28px 40px"}),
+
+], style={
+    "background": "#0f172a",
+    "minHeight": "100vh",
+    "color": "#e5e7eb",
+    "fontFamily": "Arial, sans-serif"
+})
 
 
 # =========================
@@ -732,6 +506,7 @@ def inicializar_dashboard(pathname):
 
 # =========================
 # CALLBACK DASHBOARD
+# =========================
 
 @app.callback(
     [
@@ -741,24 +516,16 @@ def inicializar_dashboard(pathname):
         Output("mapa-gps", "figure"),
         Output("tabela-entrevistador", "children"),
         Output("perguntas-dinamicas", "children"),
-        Output("audios-entrevistas", "children"),
-        Output("filtro-localidade", "options"),
-        Output("filtro-entrevistador", "options"),
-        Output("pergunta-mapa", "options"),
     ],
-    [
-        Input("pesquisa", "value"),
-        Input("filtro-localidade", "value"),
-        Input("filtro-entrevistador", "value"),
-        Input("pergunta-mapa", "value"),
-        Input("tipo-mapa", "value"),
-    ]
-)
-def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pergunta_mapa, tipo_mapa):
+
     
+    Input("pesquisa", "value")
+)
+def atualizar_dashboard(pesquisa_id):
+
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
-        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", [], [], []
+        return [], fig_vazio, fig_vazio, fig_vazio, "", ""
 
     df = carregar_dados(pesquisa_id)
 
@@ -766,31 +533,10 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_vazio = tema_fig(px.bar(title="Sem dados"))
         return [
             card("Total", "0", "Sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", [], [], []
-
-    opcoes_localidade = [
-        {"label": x, "value": x}
-        for x in sorted(df["localidade"].dropna().unique())
-    ]
-
-    opcoes_entrevistador = [
-        {"label": x, "value": x}
-        for x in sorted(df["entrevistador"].dropna().unique())
-    ]
-
-    if filtro_localidade:
-        df = df[df["localidade"] == filtro_localidade]
-
-    if filtro_entrevistador:
-        df = df[df["entrevistador"] == filtro_entrevistador]
-
-    if df.empty:
-        fig_vazio = tema_fig(px.bar(title="Sem dados para o filtro selecionado"))
-        return [
-            card("Total", "0", "Filtro sem entrevistas")
-        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", opcoes_localidade, opcoes_entrevistador, []
+        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", ""
 
     total = len(df)
+    localidades = df["localidade"].nunique()
     entrevistadores = df["entrevistador"].nunique()
 
     masc = int((df["sexo"] == "Masculino").sum())
@@ -799,8 +545,9 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
     masc_pct = round((masc / total) * 100, 1) if total else 0
     fem_pct = round((fem / total) * 100, 1) if total else 0
 
+
     kpis = [
-        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra filtrada", "#1d4ed8"),
+        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra realizada", "#1d4ed8"),
         card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
         card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
         card("Entrevistadores", entrevistadores, "Equipe em campo", "#7e22ce"),
@@ -808,7 +555,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
 
     sexo_df = df["sexo"].value_counts().reset_index()
     sexo_df.columns = ["Sexo", "Quantidade"]
-
     fig_sexo = px.pie(
         sexo_df,
         names="Sexo",
@@ -845,6 +591,27 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
     )
     fig_idade = tema_fig(fig_idade)
 
+    loc_df = df["localidade"].value_counts().reset_index()
+    loc_df.columns = ["Localidade", "Quantidade"]
+    loc_df["%"] = (loc_df["Quantidade"] / total * 100).round(1)
+    loc_df["Texto"] = (
+        loc_df["Quantidade"].astype(str)
+        + " ("
+        + loc_df["%"].astype(str)
+        + "%)"
+    )
+    loc_df = loc_df.sort_values("Quantidade", ascending=True)
+
+    fig_localidade = px.bar(
+        loc_df,
+        x="Quantidade",
+        y="Localidade",
+        orientation="h",
+        text="Texto",
+        title="Entrevistas por Localidade"
+    )
+    fig_localidade = tema_fig(fig_localidade)
+
     ent_df = df["entrevistador"].value_counts().reset_index()
     ent_df.columns = ["Entrevistador", "Quantidade"]
     ent_df["%"] = (ent_df["Quantidade"] / total * 100).round(1)
@@ -869,79 +636,25 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         page_size=10
     )
 
+
     gps_df = extrair_gps(df)
 
-    if not gps_df.empty and pergunta_mapa:
-        mapa_respostas = {}
-
-        for _, row in df.iterrows():
-            dados = normalizar_json(row.get("dados"))
-            submission = row.get("submission_id")
-            mapa_respostas[submission] = dados.get(pergunta_mapa)
-
-        gps_df["resposta_mapa"] = gps_df["submission_id"].map(mapa_respostas)
-
     if gps_df.empty:
-
         fig_mapa = tema_fig(
             px.scatter(title="Sem GPS disponível nesta pesquisa")
         )
-
     else:
-
-        if tipo_mapa == "calor":
-
-            fig_mapa = px.density_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                radius=35,
-                zoom=12,
-                height=650,
-                title="Mapa de Calor das Entrevistas"
-            )
-
-        elif pergunta_mapa and "resposta_mapa" in gps_df.columns:
-
-            gps_df["resposta_mapa"] = gps_df["resposta_mapa"].fillna("Não informado")
-
-            fig_mapa = px.scatter_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                color="resposta_mapa",
-
-                color_discrete_map={
-                    resposta: cor_resposta_mapa(resposta)
-                    for resposta in gps_df["resposta_mapa"].unique()
-                },
-
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy",
-                    "resposta_mapa"
-                ],
-                zoom=12,
-                height=650,
-                title="Mapa por Resposta da Pergunta"
-            )
-        else:
-
-            fig_mapa = px.scatter_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy"
-                ],
-                zoom=12,
-                height=650,
-                size=[14] * len(gps_df),
-                title="Mapa de Pontos das Entrevistas"
-            )
+        fig_mapa = px.scatter_mapbox(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            hover_name="localidade",
+            hover_data=["entrevistador", "accuracy"],
+            zoom=12,
+            height=650,
+            size=[14] * len(gps_df),
+            title="Mapa das Entrevistas"
+        )
 
         fig_mapa.update_layout(
             mapbox_style="open-street-map",
@@ -952,7 +665,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         )
 
     perguntas = gerar_graficos_perguntas(df, pesquisa_id)
-    audios = carregar_audios(pesquisa_id)
 
     if not perguntas:
         perguntas = [
@@ -962,22 +674,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
                 "borderRadius": "18px"
             })
         ]
-    perguntas_mapa_df = pd.read_sql(
-        text("""
-            SELECT UPPER(name) AS name, label
-            FROM perguntas_pesquisa
-            WHERE pesquisa_id = :pesquisa_id
-            AND exibir_dashboard = true
-            ORDER BY id
-        """),
-        engine,
-        params={"pesquisa_id": pesquisa_id}
-    )
-
-    opcoes_pergunta_mapa = [
-        {"label": row["label"], "value": row["name"]}
-        for _, row in perguntas_mapa_df.iterrows()
-    ]
 
     return (
         kpis,
@@ -985,98 +681,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         fig_idade,
         fig_mapa,
         tabela_ent,
-        perguntas,
-        audios,
-        opcoes_localidade,
-        opcoes_entrevistador,
-        opcoes_pergunta_mapa
-    )
-
-ODK_URL = "https://app.ar7pesquisas.com.br"
-ODK_USER = "augusto.estatistico@gmail.com"
-ODK_PASS = "@Mat050dois"
-
-
-# =========================
-# AUDIO ENDPOINT
-# =========================
-@server.route("/audio/<int:pesquisa_id>/<path:submission_id>/<path:nome_arquivo>")
-def ouvir_audio(pesquisa_id, submission_id, nome_arquivo):
-
-    if "cliente_id" not in session:
-        return "Não autorizado", 403
-
-    df = pd.read_sql(
-        text("""
-            SELECT projeto_odk, form_id
-            FROM pesquisas
-            WHERE id = :pesquisa_id
-        """),
-        engine,
-        params={"pesquisa_id": pesquisa_id}
-    )
-
-    if df.empty:
-        return "Pesquisa não encontrada", 404
-
-    projeto_odk = df.iloc[0]["projeto_odk"]
-    form_id = df.iloc[0]["form_id"]
-
-    import urllib.parse
-    import tempfile
-    import subprocess
-    import requests
-    from requests.auth import HTTPBasicAuth
-
-    submission_encoded = urllib.parse.quote(submission_id, safe="")
-    arquivo_encoded = urllib.parse.quote(nome_arquivo, safe="")
-
-    url = (
-        f"https://app.ar7pesquisas.com.br/v1/projects/{projeto_odk}"
-        f"/forms/{form_id}"
-        f"/submissions/{submission_encoded}"
-        f"/attachments/{arquivo_encoded}"
-    )
-
-    r = requests.get(
-        url,
-        auth=HTTPBasicAuth(
-            "augusto.estatistico@gmail.com",
-            "@Mat050dois"
-        )
-    )
-
-    if r.status_code != 200:
-        return f"Erro ao buscar áudio: {r.status_code}", 500
-
-    with tempfile.NamedTemporaryFile(suffix=".amr", delete=False) as entrada:
-        entrada.write(r.content)
-        entrada_path = entrada.name
-
-    saida_path = entrada_path.replace(".amr", ".mp3")
-
-    processo = subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i", entrada_path,
-            "-acodec", "libmp3lame",
-            "-ab", "64k",
-            saida_path
-        ],
-        capture_output=True,
-        text=True
-    )
-
-    if processo.returncode != 0:
-        return f"Erro ao converter áudio: {processo.stderr}", 500
-
-    with open(saida_path, "rb") as f:
-        audio_mp3 = f.read()
-
-    return Response(
-        audio_mp3,
-        mimetype="audio/mpeg"
+        perguntas
     )
 
 # =========================
