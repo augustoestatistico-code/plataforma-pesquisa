@@ -12,6 +12,11 @@ import requests
 from requests.auth import HTTPBasicAuth
 import urllib.parse
 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import io
+
 # =========================
 # CONFIG
 # =========================
@@ -490,6 +495,7 @@ def carregar_audios(pesquisa_id):
 # =========================
 app.layout = html.Div([
     dcc.Location(id="url"),
+    dcc.Store(id="secao-ativa", data="visao-geral"),
 
     # SIDEBAR
     html.Div([
@@ -505,50 +511,42 @@ app.layout = html.Div([
             "marginBottom": "12px"
         }),
 
-        html.A("📊 Visão Geral", href="#visao-geral", style={
-            "display": "block",
-            "background": "#2563eb",
-            "padding": "12px",
-            "borderRadius": "8px",
-            "marginBottom": "10px",
-            "fontWeight": "bold",
-            "color": "white",
-            "textDecoration": "none"
+        html.Button("📊 Visão Geral", id="btn-visao-geral", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "background": "#2563eb", "padding": "12px",
+            "borderRadius": "8px", "marginBottom": "10px",
+            "fontWeight": "bold", "color": "white",
+            "border": "0", "cursor": "pointer"
         }),
 
-        html.A("📝 Entrevistas", href="#entrevistas", style={
-            "display": "block",
-            "padding": "10px",
-            "color": "#cbd5e1",
-            "textDecoration": "none"
+        html.Button("📝 Entrevistas", id="btn-entrevistas", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
         }),
 
-        html.A("🗺️ Mapas", href="#mapas", style={
-            "display": "block",
-            "padding": "10px",
-            "color": "#cbd5e1",
-            "textDecoration": "none"
+        html.Button("🗺️ Mapas", id="btn-mapas", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
         }),
 
-        html.A("📋 Perguntas", href="#perguntas", style={
-            "display": "block",
-            "padding": "10px",
-            "color": "#cbd5e1",
-            "textDecoration": "none"
+        html.Button("📋 Perguntas", id="btn-perguntas", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
         }),
 
-        html.A("👥 Entrevistadores", href="#entrevistadores", style={
-            "display": "block",
-            "padding": "10px",
-            "color": "#cbd5e1",
-            "textDecoration": "none"
+        html.Button("👥 Entrevistadores", id="btn-entrevistadores", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
         }),
 
-        html.A("📄 Relatórios", href="#relatorios", style={
-            "display": "block",
-            "padding": "10px",
-            "color": "#cbd5e1",
-            "textDecoration": "none"
+        html.Button("📄 Relatórios", id="btn-relatorios", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
         }),
 
         html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
@@ -636,7 +634,15 @@ app.layout = html.Div([
 
         html.Div([
             html.Div([
-                html.H2("Acompanhamento em Tempo Real", id="visao-geral", style={"margin": "0"}),
+                html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+                html.Div(
+                    id="debug-secao",
+                    style={
+                        "color": "yellow",
+                        "fontWeight": "bold",
+                        "marginBottom": "10px"
+                    }
+                ),
                 html.Div("Dados atualizados automaticamente", style={
                     "color": "#94a3b8",
                     "fontSize": "13px",
@@ -660,65 +666,62 @@ app.layout = html.Div([
             "marginBottom": "22px"
         }),
 
-        html.Div(id="kpis", style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(4, 1fr)",
-            "gap": "18px",
-            "marginBottom": "20px"
-        }),
-
         html.Div([
-            html.Div([dcc.Graph(id="grafico-sexo")], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
-            }),
-            html.Div([dcc.Graph(id="grafico-idade")], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
-            }),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "1fr 1fr",
-            "gap": "18px",
-            "marginBottom": "20px"
-        }),
-
-        html.Div([
-            html.Div([dcc.Graph(id="mapa-gps")], id="mapas", style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "10px"
+            html.Div(id="kpis", style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(4, 1fr)",
+                "gap": "18px",
+                "marginBottom": "20px"
             }),
 
             html.Div([
-                html.H3("Desempenho por Entrevistador", id="entrevistadores", style={"marginTop": "0"}),
-                html.Div(id="tabela-entrevistador")
+                html.Div([dcc.Graph(id="grafico-sexo")], style={
+                    "background": "#111827",
+                    "borderRadius": "14px",
+                    "border": "1px solid #1f2937",
+                    "padding": "10px"
+                }),
+                html.Div([dcc.Graph(id="grafico-idade")], style={
+                    "background": "#111827",
+                    "borderRadius": "14px",
+                    "border": "1px solid #1f2937",
+                    "padding": "10px"
+                }),
             ], style={
+                "display": "grid",
+                "gridTemplateColumns": "1fr 1fr",
+                "gap": "18px",
+                "marginBottom": "20px"
+            }),
+        ], id="secao-visao-geral"),
+
+        html.Div([
+            html.Div([dcc.Graph(id="mapa-gps")], style={
                 "background": "#111827",
                 "borderRadius": "14px",
                 "border": "1px solid #1f2937",
-                "padding": "18px"
+                "padding": "10px"
             }),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "1.4fr 1fr",
-            "gap": "18px",
-            "marginBottom": "20px"
+        ], id="secao-mapas"),
+
+        html.Div([
+            html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
+            html.Div(id="perguntas-dinamicas")
+        ], id="secao-perguntas"),
+
+        html.Div([
+            html.H3("Desempenho por Entrevistador", style={"marginTop": "0"}),
+            html.Div(id="tabela-entrevistador")
+        ], id="secao-entrevistadores", style={
+            "background": "#111827",
+            "borderRadius": "14px",
+            "border": "1px solid #1f2937",
+            "padding": "18px"
         }),
 
         html.Div([
-            html.H2("Resultados das Perguntas", id="perguntas", style={"marginBottom": "16px"}),
-            html.Div(id="perguntas-dinamicas")
-        ]),
-
-        html.Div([
-            html.H2("Entrevistas/ Auditoria", id="entrevistas", style={
-                "marginTop": "30px",
+            html.H2("Entrevistas / Auditoria", style={
+                "marginTop": "0",
                 "marginBottom": "16px"
             }),
             html.H3("Lista de Entrevistas"),
@@ -726,7 +729,7 @@ app.layout = html.Div([
 
             html.H3("Auditoria de Áudios"),
             html.Div(id="audios-entrevistas")
-        ], style={
+        ], id="secao-entrevistas", style={
             "background": "#111827",
             "borderRadius": "14px",
             "border": "1px solid #1f2937",
@@ -735,34 +738,58 @@ app.layout = html.Div([
         }),
 
         html.Div([
-            html.H2("Relatórios", id="relatorios", style={
-                "marginTop": "30px",
+            html.H2("Relatórios", style={
+                "marginTop": "0",
                 "marginBottom": "16px"
             }),
-        html.Div([
-            html.A(
-                "📥 Exportar base da pesquisa em Excel",
-                id="link-exportar-excel",
-                href="#",
-                target="_blank",
-                style={
-                    "display": "inline-block",
-                    "background": "#2563eb",
-                    "color": "white",
-                    "padding": "12px 18px",
-                    "borderRadius": "10px",
-                    "textDecoration": "none",
-                    "fontWeight": "bold"
-                }
-            )
-        ], style={
-            "background": "#111827",
-            "borderRadius": "14px",
-            "border": "1px solid #1f2937",
-            "padding": "20px",
-            "color": "#cbd5e1"
-        })
-        ])
+        html.H1(
+            "TESTE PDF",
+            style={"color":"red"}
+        ),
+            html.Div([
+                html.A(
+                    "📥 Exportar base da pesquisa em Excel",
+                    id="link-exportar-excel",
+                    href="#",
+                    target="_blank",
+                    style={
+                        "display": "inline-block",
+                        "background": "#2563eb",
+                        "color": "white",
+                        "padding": "12px 18px",
+                        "borderRadius": "10px",
+                        "textDecoration": "none",
+                        "fontWeight": "bold"
+                    }
+                ),
+
+            
+
+                html.A(
+                    "📄 Gerar Relatório PDF",
+                    id="link-gerar-pdf",
+                    href="#",
+                    target="_blank",
+                    style={
+                        "display": "inline-block",
+                        "background": "#16a34a",
+                        "color": "white",
+                        "padding": "12px 18px",
+                        "borderRadius": "10px",
+                        "textDecoration": "none",
+                        "fontWeight": "bold",
+                        "marginLeft": "10px"
+                    }
+                )
+
+            ], style={
+                "background": "#111827",
+                "borderRadius": "14px",
+                "border": "1px solid #1f2937",
+                "padding": "20px",
+                "color": "#cbd5e1"
+            })
+        ], id="secao-relatorios"),
 
     ], style={
         "marginLeft": "260px",
@@ -774,10 +801,17 @@ app.layout = html.Div([
     })
 
 ])
-        
+
 # =========================
 # CALLBACK PESQUISAS
 # =========================
+@app.callback(
+    Output("debug-secao", "children"),
+    Input("secao-ativa", "data")
+)
+def mostrar_secao(secao):
+    return f"SEÇÃO ATIVA: {secao}"
+
 @app.callback(
     [
         Output("pesquisa", "options"),
@@ -1170,6 +1204,94 @@ def atualizar_link_excel(pesquisa_id):
         return "#"
 
     return f"/exportar_excel/{pesquisa_id}"
+
+@app.callback(
+    Output("link-gerar-pdf", "href"),
+    Input("pesquisa", "value")
+)
+def atualizar_link_pdf(pesquisa_id):
+
+    if not pesquisa_id:
+        return "#"
+
+    return f"/gerar_pdf/{pesquisa_id}"
+
+
+# =========================
+# CALLBACK MENU POR SEÇÃO
+# =========================
+@app.callback(
+    Output("secao-ativa", "data"),
+    [
+        Input("btn-visao-geral", "n_clicks"),
+        Input("btn-entrevistas", "n_clicks"),
+        Input("btn-mapas", "n_clicks"),
+        Input("btn-perguntas", "n_clicks"),
+        Input("btn-entrevistadores", "n_clicks"),
+        Input("btn-relatorios", "n_clicks"),
+    ]
+)
+def mudar_secao(n1, n2, n3, n4, n5, n6):
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return "visao-geral"
+
+    botao = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    mapa = {
+        "btn-visao-geral": "visao-geral",
+        "btn-entrevistas": "entrevistas",
+        "btn-mapas": "mapas",
+        "btn-perguntas": "perguntas",
+        "btn-entrevistadores": "entrevistadores",
+        "btn-relatorios": "relatorios",
+    }
+
+    return mapa.get(botao, "visao-geral")
+
+
+@app.callback(
+    [
+        Output("secao-visao-geral", "style"),
+        Output("secao-entrevistas", "style"),
+        Output("secao-mapas", "style"),
+        Output("secao-perguntas", "style"),
+        Output("secao-entrevistadores", "style"),
+        Output("secao-relatorios", "style"),
+    ],
+    Input("secao-ativa", "data")
+)
+def exibir_secao(secao):
+    base = {"display": "block", "marginBottom": "20px"}
+    oculto = {"display": "none"}
+
+    style_entrevistas = {
+        "display": "block",
+        "background": "#111827",
+        "borderRadius": "14px",
+        "border": "1px solid #1f2937",
+        "padding": "20px",
+        "marginTop": "20px"
+    }
+
+    style_entrevistadores = {
+        "display": "block",
+        "background": "#111827",
+        "borderRadius": "14px",
+        "border": "1px solid #1f2937",
+        "padding": "18px"
+    }
+
+    return (
+        base if secao == "visao-geral" else oculto,
+        style_entrevistas if secao == "entrevistas" else oculto,
+        base if secao == "mapas" else oculto,
+        base if secao == "perguntas" else oculto,
+        style_entrevistadores if secao == "entrevistadores" else oculto,
+        base if secao == "relatorios" else oculto,
+    )
+
 # =========================
 # AUDIO ENDPOINT
 # =========================
@@ -1287,6 +1409,56 @@ def exportar_excel(pesquisa_id):
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f"attachment; filename=pesquisa_{pesquisa_id}.xlsx"
+        }
+    )
+# =========================
+# GERAR PDF
+# =========================
+@server.route("/gerar_pdf/<int:pesquisa_id>")
+def gerar_pdf(pesquisa_id):
+
+    if "cliente_id" not in session:
+        return "Não autorizado", 403
+
+    df = carregar_dados(pesquisa_id)
+
+    if df.empty:
+        return "Sem dados", 404
+
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(buffer)
+
+    styles = getSampleStyleSheet()
+
+    elementos = []
+
+    elementos.append(
+        Paragraph(
+            f"<b>Relatório da Pesquisa {pesquisa_id}</b>",
+            styles["Title"]
+        )
+    )
+
+    elementos.append(Spacer(1, 20))
+
+    elementos.append(
+        Paragraph(
+            f"Total de entrevistas: {len(df)}",
+            styles["Normal"]
+        )
+    )
+
+    doc.build(elementos)
+
+    buffer.seek(0)
+
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition":
+            f"attachment; filename=relatorio_{pesquisa_id}.pdf"
         }
     )
 
