@@ -548,7 +548,12 @@ app.layout = html.Div([
             "padding": "10px", "color": "#cbd5e1",
             "background": "transparent", "border": "0", "cursor": "pointer"
         }),
-
+        html.Button("🧠 Inteligência", id="btn-inteligencia", n_clicks=0, style={
+            "display": "block", "width": "100%", "textAlign": "left",
+            "padding": "10px", "color": "#cbd5e1",
+            "background": "transparent", "border": "0", "cursor": "pointer"
+        }),
+        
         html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
 
         html.Div("FILTROS", style={
@@ -630,41 +635,33 @@ app.layout = html.Div([
     }),
 
     # CONTEÚDO PRINCIPAL
-    html.Div([
-
         html.Div([
-            html.Div([
-                html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
-                html.Div(
-                    id="debug-secao",
-                    style={
-                        "color": "yellow",
-                        "fontWeight": "bold",
-                        "marginBottom": "10px"
-                    }
-                ),
-                html.Div("Dados atualizados automaticamente", style={
-                    "color": "#94a3b8",
-                    "fontSize": "13px",
-                    "marginTop": "4px"
-                }),
-            ]),
 
             html.Div([
-                html.Div(id="cliente-header", style={"color": "#cbd5e1"}),
-                html.Div(id="pesquisa-header", style={
-                    "color": "#94a3b8",
-                    "fontSize": "12px",
-                    "marginTop": "6px",
-                    "textAlign": "right"
-                })
-            ])
-        ], style={
-            "display": "flex",
-            "justifyContent": "space-between",
-            "alignItems": "center",
-            "marginBottom": "22px"
-        }),
+                html.Div([
+                    html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+                    html.Div("Dados atualizados automaticamente", style={
+                        "color": "#94a3b8",
+                        "fontSize": "13px",
+                        "marginTop": "4px"
+                    }),
+                ]),
+
+                html.Div([
+                    html.Div(id="cliente-header", style={"color": "#cbd5e1"}),
+                    html.Div(id="pesquisa-header", style={
+                        "color": "#94a3b8",
+                        "fontSize": "12px",
+                        "marginTop": "6px",
+                        "textAlign": "right"
+                    })
+                ])
+            ], style={
+                "display": "flex",
+                "justifyContent": "space-between",
+                "alignItems": "center",
+                "marginBottom": "22px"
+            }),
 
         html.Div([
             html.Div(id="kpis", style={
@@ -742,10 +739,7 @@ app.layout = html.Div([
                 "marginTop": "0",
                 "marginBottom": "16px"
             }),
-        html.H1(
-            "TESTE PDF",
-            style={"color":"red"}
-        ),
+
             html.Div([
                 html.A(
                     "📥 Exportar base da pesquisa em Excel",
@@ -790,6 +784,23 @@ app.layout = html.Div([
                 "color": "#cbd5e1"
             })
         ], id="secao-relatorios"),
+        html.Div([
+
+            html.H2(
+                "Inteligência Eleitoral",
+                style={"marginBottom": "20px"}
+            ),
+
+            html.Div(
+                id="inteligencia-conteudo"
+            )
+
+        ],
+        id="secao-inteligencia",
+        style={
+            "display": "none"
+        }),
+                    
 
     ], style={
         "marginLeft": "260px",
@@ -805,13 +816,6 @@ app.layout = html.Div([
 # =========================
 # CALLBACK PESQUISAS
 # =========================
-@app.callback(
-    Output("debug-secao", "children"),
-    Input("secao-ativa", "data")
-)
-def mostrar_secao(secao):
-    return f"SEÇÃO ATIVA: {secao}"
-
 @app.callback(
     [
         Output("pesquisa", "options"),
@@ -1190,6 +1194,106 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         pesquisa_header
     )
 
+# =========================
+# CALLBACK INTELIGÊNCIA
+# =========================
+@app.callback(
+    Output("inteligencia-conteudo", "children"),
+    Input("pesquisa", "value")
+)
+def gerar_inteligencia(pesquisa_id):
+
+    if not pesquisa_id:
+        return html.Div("Selecione uma pesquisa para gerar a inteligência.", style={"color": "#cbd5e1"})
+
+    df = carregar_dados(pesquisa_id)
+
+    if df.empty:
+        return html.Div("Sem dados para gerar inteligência.", style={"color": "#cbd5e1"})
+
+    total = len(df)
+
+    sexo_top = df["sexo"].value_counts().idxmax() if "sexo" in df.columns and not df["sexo"].empty else "Não informado"
+    idade_top = df["idade"].value_counts().idxmax() if "idade" in df.columns and not df["idade"].empty else "Não informado"
+    loc_top = df["localidade"].value_counts().idxmax() if "localidade" in df.columns and not df["localidade"].empty else "Não informado"
+    entrevistador_top = df["entrevistador"].value_counts().idxmax() if "entrevistador" in df.columns and not df["entrevistador"].empty else "Não informado"
+
+    pct_fem = round((df["sexo"].eq("Feminino").sum() / total) * 100, 1) if total else 0
+    pct_masc = round((df["sexo"].eq("Masculino").sum() / total) * 100, 1) if total else 0
+
+    localidades_top = df["localidade"].value_counts().head(5).reset_index()
+    localidades_top.columns = ["Localidade", "Entrevistas"]
+    localidades_top["%"] = (localidades_top["Entrevistas"] / total * 100).round(1)
+
+    tabela_localidades = dash_table.DataTable(
+        data=localidades_top.to_dict("records"),
+        columns=[{"name": c, "id": c} for c in localidades_top.columns],
+        style_table={"overflowX": "auto"},
+        style_header={
+            "backgroundColor": "#020617",
+            "color": "white",
+            "fontWeight": "bold",
+            "border": "1px solid #1f2937"
+        },
+        style_cell={
+            "backgroundColor": "#111827",
+            "color": "#e5e7eb",
+            "border": "1px solid #1f2937",
+            "padding": "9px",
+            "textAlign": "left"
+        },
+        page_size=5
+    )
+
+    resumo = (
+        f"A pesquisa possui {total} entrevistas válidas. "
+        f"O perfil predominante da amostra é {sexo_top}, com maior concentração na faixa etária {idade_top}. "
+        f"A localidade com maior volume de entrevistas é {loc_top}. "
+        f"A distribuição por sexo apresenta {pct_fem}% de mulheres e {pct_masc}% de homens. "
+        f"O entrevistador com maior número de registros é {entrevistador_top}."
+    )
+
+    return html.Div([
+
+        html.Div([
+            card("Total de entrevistas", f"{total:,}".replace(",", "."), "Base válida"),
+            card("Perfil predominante", sexo_top, f"Feminino {pct_fem}% | Masculino {pct_masc}%"),
+            card("Faixa etária líder", idade_top, "Maior presença na amostra"),
+            card("Localidade líder", loc_top, "Maior concentração territorial"),
+        ], style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(4, 1fr)",
+            "gap": "18px",
+            "marginBottom": "22px"
+        }),
+
+        html.Div([
+            html.H3("Resumo Executivo Automático", style={"marginTop": "0"}),
+            html.P(resumo, style={
+                "fontSize": "16px",
+                "lineHeight": "1.6",
+                "color": "#e5e7eb"
+            })
+        ], style={
+            "background": "#111827",
+            "borderRadius": "14px",
+            "border": "1px solid #1f2937",
+            "padding": "20px",
+            "marginBottom": "22px"
+        }),
+
+        html.Div([
+            html.H3("Top 5 Localidades", style={"marginTop": "0"}),
+            tabela_localidades
+        ], style={
+            "background": "#111827",
+            "borderRadius": "14px",
+            "border": "1px solid #1f2937",
+            "padding": "20px"
+        })
+
+    ])
+
 ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"
@@ -1229,9 +1333,11 @@ def atualizar_link_pdf(pesquisa_id):
         Input("btn-perguntas", "n_clicks"),
         Input("btn-entrevistadores", "n_clicks"),
         Input("btn-relatorios", "n_clicks"),
+        Input("btn-inteligencia", "n_clicks"),
+        
     ]
 )
-def mudar_secao(n1, n2, n3, n4, n5, n6):
+def mudar_secao(n1, n2, n3, n4, n5, n6, n7):
     ctx = dash.callback_context
 
     if not ctx.triggered:
@@ -1246,6 +1352,7 @@ def mudar_secao(n1, n2, n3, n4, n5, n6):
         "btn-perguntas": "perguntas",
         "btn-entrevistadores": "entrevistadores",
         "btn-relatorios": "relatorios",
+        "btn-inteligencia": "inteligencia",
     }
 
     return mapa.get(botao, "visao-geral")
@@ -1259,6 +1366,7 @@ def mudar_secao(n1, n2, n3, n4, n5, n6):
         Output("secao-perguntas", "style"),
         Output("secao-entrevistadores", "style"),
         Output("secao-relatorios", "style"),
+        Output("secao-inteligencia", "style"),
     ],
     Input("secao-ativa", "data")
 )
@@ -1290,6 +1398,7 @@ def exibir_secao(secao):
         base if secao == "perguntas" else oculto,
         style_entrevistadores if secao == "entrevistadores" else oculto,
         base if secao == "relatorios" else oculto,
+        base if secao == "inteligencia" else oculto,
     )
 
 # =========================
@@ -1425,29 +1534,142 @@ def gerar_pdf(pesquisa_id):
     if df.empty:
         return "Sem dados", 404
 
-    buffer = io.BytesIO()
+    cliente = get_cliente(session.get("cliente_id"))
 
-    doc = SimpleDocTemplate(buffer)
+    try:
+        pesquisa_nome = [
+            opt["label"]
+            for opt in lista_pesquisas(session.get("cliente_id"))
+            if opt["value"] == pesquisa_id
+        ][0]
+    except:
+        pesquisa_nome = f"Pesquisa ID {pesquisa_id}"
+
+    dados_json = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_json)
+
+    perguntas_df = pd.read_sql(
+        text("""
+            SELECT UPPER(name) AS name, label
+            FROM perguntas_pesquisa
+            WHERE pesquisa_id = :pesquisa_id
+            AND exibir_dashboard = true
+            ORDER BY id
+        """),
+        engine,
+        params={"pesquisa_id": pesquisa_id}
+    )
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
 
     styles = getSampleStyleSheet()
-
     elementos = []
+    elementos.append(Paragraph("<b>RELATÓRIO DE PESQUISA</b>", styles["Title"]))
+    elementos.append(Spacer(1, 18))
+    elementos.append(Paragraph(f"<b>Cliente:</b> {cliente['nome']}", styles["Normal"]))
+    elementos.append(Paragraph(f"<b>Pesquisa:</b> {pesquisa_nome}", styles["Normal"]))
+    elementos.append(Paragraph(f"<b>Total de entrevistas:</b> {len(df)}", styles["Normal"]))
+    elementos.append(Spacer(1, 24))
 
-    elementos.append(
-        Paragraph(
-            f"<b>Relatório da Pesquisa {pesquisa_id}</b>",
-            styles["Title"]
-        )
-    )
+    elementos.append(Paragraph("<b>1. Resumo Executivo</b>", styles["Heading1"]))
 
-    elementos.append(Spacer(1, 20))
+    total = len(df)
+    masc = int((df["sexo"] == "Masculino").sum())
+    fem = int((df["sexo"] == "Feminino").sum())
+    entrevistadores = df["entrevistador"].nunique()
 
-    elementos.append(
-        Paragraph(
-            f"Total de entrevistas: {len(df)}",
-            styles["Normal"]
-        )
-    )
+    masc_pct = round(masc / total * 100, 1) if total else 0
+    fem_pct = round(fem / total * 100, 1) if total else 0
+
+    elementos.append(Paragraph(f"Entrevistas realizadas: <b>{total}</b>", styles["Normal"]))
+    elementos.append(Paragraph(f"Masculino: <b>{masc}</b> entrevistas ({masc_pct}%)", styles["Normal"]))
+    elementos.append(Paragraph(f"Feminino: <b>{fem}</b> entrevistas ({fem_pct}%)", styles["Normal"]))
+    elementos.append(Paragraph(f"Entrevistadores em campo: <b>{entrevistadores}</b>", styles["Normal"]))
+    elementos.append(Spacer(1, 18))
+
+    elementos.append(Paragraph("<b>2. Perfil da Amostra</b>", styles["Heading1"]))
+
+    for coluna, titulo in [
+        ("sexo", "Sexo"),
+        ("idade", "Faixa Etária"),
+        ("localidade", "Localidade"),
+        ("entrevistador", "Entrevistador")
+    ]:
+        elementos.append(Paragraph(f"<b>{titulo}</b>", styles["Heading2"]))
+
+        resumo = df[coluna].value_counts().reset_index()
+        resumo.columns = ["Categoria", "Quantidade"]
+
+        for _, row in resumo.iterrows():
+            pct = round(row["Quantidade"] / total * 100, 1)
+            elementos.append(
+                Paragraph(
+                    f"{row['Categoria']}: {row['Quantidade']} ({pct}%)",
+                    styles["Normal"]
+                )
+            )
+
+        elementos.append(Spacer(1, 10))
+
+    elementos.append(PageBreak())
+
+    elementos.append(Paragraph("<b>3. Resultados das Perguntas</b>", styles["Heading1"]))
+
+    for _, pergunta in perguntas_df.iterrows():
+
+        nome_coluna = pergunta["name"]
+        label = pergunta["label"]
+
+        coluna_real = None
+
+        for c in json_df.columns:
+            if c.upper() == nome_coluna:
+                coluna_real = c
+                break
+
+        if coluna_real is None:
+            continue
+
+        serie = json_df[coluna_real].dropna().astype(str).str.strip()
+        serie = serie[serie != ""]
+
+        if serie.empty:
+            continue
+
+        elementos.append(Paragraph(f"<b>{label}</b>", styles["Heading2"]))
+
+        contagem = serie.value_counts().reset_index()
+        contagem.columns = ["Resposta", "Quantidade"]
+
+        base = contagem["Quantidade"].sum()
+
+        for _, row in contagem.iterrows():
+            pct = round(row["Quantidade"] / base * 100, 1)
+            elementos.append(
+                Paragraph(
+                    f"{row['Resposta']}: {row['Quantidade']} ({pct}%)",
+                    styles["Normal"]
+                )
+            )
+
+        elementos.append(Spacer(1, 14))
+
+    elementos.append(PageBreak())
+
+    elementos.append(Paragraph("<b>4. Observação Técnica</b>", styles["Heading1"]))
+    elementos.append(Paragraph(
+        "Relatório gerado automaticamente pela plataforma Ipsensus Survey, "
+        "com base nos dados coletados via ODK, processados no banco Supabase "
+        "e visualizados no dashboard operacional.",
+        styles["Normal"]
+    ))
 
     doc.build(elementos)
 
@@ -1457,10 +1679,10 @@ def gerar_pdf(pesquisa_id):
         buffer.getvalue(),
         mimetype="application/pdf",
         headers={
-            "Content-Disposition":
-            f"attachment; filename=relatorio_{pesquisa_id}.pdf"
+            "Content-Disposition": f"attachment; filename=relatorio_{pesquisa_id}.pdf"
         }
     )
+
 
 # =========================
 # ETL ENDPOINT
@@ -1488,7 +1710,6 @@ def rodar_etl():
     <h3>Código retorno</h3>
     <pre>{resultado.returncode}</pre>
     """
-
 
 # =========================
 # RUN
