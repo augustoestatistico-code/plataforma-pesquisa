@@ -6,3 +6,5 @@ psycopg2-binary
 requests
 gunicorn
 openpyxl
+reportlab
+kaleido
