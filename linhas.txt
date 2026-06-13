@@ -1,0 +1,1627 @@
+1:import os
+2:import json
+3:import pandas as pd
+4:from sqlalchemy import create_engine, text
+5:import dash
+6:from dash import dcc, html, Input, Output, dash_table
+7:import plotly.express as px
+8:from flask import Flask, request, session, redirect, Response
+9:import subprocess
+10:import sys
+11:import requests
+12:from requests.auth import HTTPBasicAuth
+13:import urllib.parse
+14:
+15:from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+16:from reportlab.lib.styles import getSampleStyleSheet
+17:from reportlab.lib import colors
+18:import io
+19:
+20:# =========================
+21:# CONFIG
+22:# =========================
+23:DATABASE_URL = os.getenv("DATABASE_URL")
+24:SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+25:
+26:server = Flask(__name__)
+27:server.secret_key = SECRET_KEY
+28:
+29:engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+30:
+31:# =========================
+32:# LOGIN
+33:# =========================
+34:@server.route("/", methods=["GET", "POST"])
+35:def login():
+36:    if request.method == "POST":
+37:        email = request.form.get("email")
+38:        senha = request.form.get("senha")
+39:
+40:        query = text("""
+41:            SELECT id, cliente_id
+42:            FROM usuarios
+43:            WHERE email = :email AND senha = :senha
+44:        """)
+45:
+46:        with engine.connect() as conn:
+47:            user = conn.execute(query, {"email": email, "senha": senha}).fetchone()
+48:
+49:        if user:
+50:            session["user_id"] = user[0]
+51:            session["cliente_id"] = user[1]
+52:            return redirect("/dashboard/")
+53:
+54:        return """
+55:        <body style="background:#0f172a;color:white;font-family:Arial;text-align:center;margin-top:100px">
+56:            <h2>Login inválido</h2>
+57:            <a href="/" style="color:#38bdf8">Voltar</a>
+58:        </body>
+59:        """
+60:
+61:    return """
+62:    <body style="margin:0;background:#0f172a;font-family:Arial;color:white">
+63:        <div style="width:360px;margin:120px auto;background:#111827;padding:35px;border-radius:18px;box-shadow:0 0 25px #000">
+64:            <h2 style="text-align:center">📊 Plataforma Pesquisa</h2>
+65:            <form method="post">
+66:                <label>Email</label>
+67:                <input name="email" style="width:100%;padding:12px;margin:8px 0 18px;border-radius:8px;border:0">
+68:                <label>Senha</label>
+69:                <input name="senha" type="password" style="width:100%;padding:12px;margin:8px 0 22px;border-radius:8px;border:0">
+70:                <button style="width:100%;padding:13px;background:#2563eb;color:white;border:0;border-radius:10px;font-weight:bold">
+71:                    Entrar
+72:                </button>
+73:            </form>
+74:        </div>
+75:    </body>
+76:    """
+77:
+78:
+79:@server.route("/logout")
+80:def logout():
+81:    session.clear()
+82:    return redirect("/")
+83:
+84:
+85:@server.before_request
+86:def proteger_dashboard():
+87:    if request.path.startswith("/dashboard") and "cliente_id" not in session:
+88:        return redirect("/")
+89:
+90:
+91:# =========================
+92:# DASH
+93:# =========================
+94:app = dash.Dash(
+95:    __name__,
+96:    server=server,
+97:    url_base_pathname="/dashboard/",
+98:    suppress_callback_exceptions=True
+99:)
+100:
+101:# =========================
+102:# FUNÇÕES
+103:# =========================
+104:def get_cliente(cliente_id):
+105:    query = text("""
+106:        SELECT nome, logo_url
+107:        FROM clientes
+108:        WHERE id = :cliente_id
+109:    """)
+110:
+111:    with engine.connect() as conn:
+112:        row = conn.execute(query, {"cliente_id": cliente_id}).fetchone()
+113:
+114:    if row:
+115:        logo = row[1] or "/dashboard/assets/logos/sem_logo.png"
+116:        return {"nome": row[0], "logo": logo}
+117:
+118:    return {
+119:        "nome": "Cliente",
+120:        "logo": "/dashboard/assets/logos/sem_logo.png"
+121:    }
+122:
+123:
+124:def lista_pesquisas(cliente_id):
+125:    df = pd.read_sql(
+126:        text("""
+127:            SELECT id, nome
+128:            FROM pesquisas
+129:            WHERE cliente_id = :cliente_id
+130:            ORDER BY id DESC
+131:        """),
+132:        engine,
+133:        params={"cliente_id": cliente_id}
+134:    )
+135:
+136:    return [{"label": row["nome"], "value": row["id"]} for _, row in df.iterrows()]
+137:
+138:
+139:def carregar_dados(pesquisa_id):
+140:    df = pd.read_sql(
+141:        text("""
+142:            SELECT id, submission_id, pesquisa_id, sexo, idade, localidade, dados, entrevistador
+143:            FROM entrevistas
+144:            WHERE pesquisa_id = :pesquisa_id
+145:            ORDER BY id DESC
+146:        """),
+147:        engine,
+148:        params={"pesquisa_id": pesquisa_id}
+149:    )
+150:
+151:    if df.empty:
+152:        return df
+153:
+154:    df["sexo"] = df["sexo"].fillna("Não informado").astype(str).str.strip().str.title()
+155:    df["idade"] = df["idade"].fillna("Não informado").astype(str).str.strip()
+156:    df["localidade"] = df["localidade"].fillna("Não informado").astype(str).str.strip().str.upper()
+157:    df["entrevistador"] = df["entrevistador"].fillna("Não informado").astype(str).str.strip()
+158:
+159:    return df
+160:
+161:
+162:def normalizar_json(valor):
+163:    if isinstance(valor, dict):
+164:        return valor
+165:
+166:    if isinstance(valor, str):
+167:        try:
+168:            return json.loads(valor)
+169:        except Exception:
+170:            return {}
+171:
+172:    return {}
+173:
+174:
+175:def extrair_gps(df):
+176:    pontos = []
+177:
+178:    if "dados" not in df.columns:
+179:        return pd.DataFrame()
+180:
+181:    for _, row in df.iterrows():
+182:        dados = normalizar_json(row.get("dados"))
+183:
+184:        lat = dados.get("latitude_melhor") or dados.get("lat_final") or dados.get("lat_inicio")
+185:        lon = dados.get("longitude_melhor") or dados.get("lon_final") or dados.get("lon_inicio")
+186:
+187:        if (not lat or not lon) and isinstance(dados.get("gps_final"), dict):
+188:            coords = dados["gps_final"].get("coordinates", [])
+189:            if len(coords) >= 2:
+190:                lon = coords[0]
+191:                lat = coords[1]
+192:
+193:        try:
+194:            if lat and lon:
+195:                pontos.append({
+196:                    "submission_id": row.get("submission_id"),
+197:                    "lat": float(lat),
+198:                    "lon": float(lon),
+199:                    "localidade": row.get("localidade", ""),
+200:                    "entrevistador": row.get("entrevistador", ""),
+201:                    "accuracy": dados.get("accuracy_melhor") or dados.get("acc_final") or ""
+202:                })
+203:        except:
+204:            pass
+205:
+206:    return pd.DataFrame(pontos)
+207:
+208:
+209:def card(titulo, valor, subtitulo="", cor="#2563eb"):
+210:    return html.Div([
+211:        html.Div(titulo.upper(), style={
+212:            "fontSize": "12px",
+213:            "fontWeight": "bold",
+214:            "color": "#bfdbfe"
+215:        }),
+216:        html.Div(valor, style={
+217:            "fontSize": "34px",
+218:            "fontWeight": "bold",
+219:            "marginTop": "8px",
+220:            "color": "white"
+221:        }),
+222:        html.Div(subtitulo, style={
+223:            "fontSize": "12px",
+224:            "color": "#cbd5e1",
+225:            "marginTop": "6px"
+226:        })
+227:    ], style={
+228:        "background": f"linear-gradient(135deg, {cor}, #0f172a)",
+229:        "padding": "22px",
+230:        "borderRadius": "16px",
+231:        "border": "1px solid #1e293b",
+232:        "boxShadow": "0 8px 24px rgba(0,0,0,.35)"
+233:    })
+234:
+235:def tema_fig(fig):
+236:    fig.update_layout(
+237:        paper_bgcolor="#111827",
+238:        plot_bgcolor="#111827",
+239:        font_color="#e5e7eb",
+240:        title_font_color="#ffffff",
+241:        margin=dict(l=35, r=25, t=55, b=35),
+242:        legend=dict(bgcolor="rgba(0,0,0,0)")
+243:    )
+244:
+245:    fig.update_xaxes(gridcolor="#1f2937")
+246:    fig.update_yaxes(gridcolor="#1f2937")
+247:
+248:    return fig
+249:
+250:def cor_resposta_mapa(valor):
+251:
+252:    valor = str(valor).strip().lower()
+253:
+254:    mapa = {
+255:        "aprova": "#16a34a",
+256:        "desaprova": "#dc2626",
+257:        "ótima": "#15803d",
+258:        "otima": "#15803d",
+259:        "boa": "#22c55e",
+260:        "regular": "#facc15",
+261:        "ruim": "#f97316",
+262:        "péssima": "#b91c1c",
+263:        "pessima": "#b91c1c",
+264:        "sim": "#16a34a",
+265:        "não": "#dc2626",
+266:        "nao": "#dc2626",
+267:        "talvez": "#facc15",
+268:        "indeciso": "#9ca3af",
+269:        "indeciso ": "#9ca3af",
+270:        "não sabe": "#9ca3af",
+271:        "nao sabe": "#9ca3af",
+272:        "ns/nr": "#9ca3af",
+273:        "nenhum": "#6b7280",
+274:        "branco/nulo": "#6b7280",
+275:    }
+276:
+277:    return mapa.get(valor, "#3b82f6")
+278:
+279:    fig.update_xaxes(gridcolor="#1f2937")
+280:    fig.update_yaxes(gridcolor="#1f2937")
+281:    return fig
+282:
+283:
+284:def pergunta_deve_ignorar(coluna):
+285:    colunas_ignorar_fixas = {
+286:        "meta.instanceID",
+287:        "instanceID",
+288:        "__system",
+289:        "_id",
+290:        "_uuid",
+291:        "_submission_time",
+292:        "nome",
+293:        "loc1",
+294:        "pesquisa_inicio",
+295:        "pesquisa_fim",
+296:        "hoje",
+297:        "HOJE",
+298:        "PESQUISA_INICIO",
+299:        "PESQUISA_FIM"
+300:    }
+301:
+302:    if coluna in colunas_ignorar_fixas:
+303:        return True
+304:
+305:    if coluna.startswith("_system."):
+306:        return True
+307:
+308:    if coluna.startswith("_"):
+309:        return True
+310:
+311:    return False
+312:
+313:def gerar_graficos_perguntas(df, pesquisa_id, pergunta_selecionada=None):
+314:    perguntas = []
+315:
+316:    if "dados" not in df.columns:
+317:        return perguntas
+318:
+319:    dados_normalizados = df["dados"].apply(normalizar_json)
+320:    json_df = pd.json_normalize(dados_normalizados)
+321:
+322:    if json_df.empty:
+323:        return perguntas
+324:
+325:    perguntas_exibir = pd.read_sql(
+326:        text("""
+327:            SELECT
+328:                UPPER(name) AS name,
+329:                label,
+330:                id
+331:            FROM perguntas_pesquisa
+332:            WHERE pesquisa_id = :pesquisa_id
+333:            AND exibir_dashboard = true
+334:            ORDER BY id
+335:        """),
+336:        engine,
+337:        params={"pesquisa_id": pesquisa_id}
+338:    )
+339:
+340:    lista_exibir = set(perguntas_exibir["name"].tolist())
+341:    labels = dict(zip(perguntas_exibir["name"], perguntas_exibir["label"]))
+342:
+343:    if pergunta_selecionada:
+344:        ordem_perguntas = [pergunta_selecionada.upper()]
+345:    else:
+346:        ordem_perguntas = perguntas_exibir["name"].tolist()
+347:
+348:    for coluna_upper in ordem_perguntas:
+349:
+350:        coluna_real = None
+351:
+352:        for c in json_df.columns:
+353:            if c.upper() == coluna_upper:
+354:                coluna_real = c
+355:                break
+356:
+357:        if coluna_real is None:
+358:            continue
+359:
+360:        coluna = coluna_real
+361:        coluna_upper = coluna.upper()
+362:
+363:        if coluna_upper not in lista_exibir:
+364:            continue
+365:
+366:        serie = json_df[coluna].dropna().astype(str).str.strip()
+367:        serie = serie[serie != ""]
+368:
+369:        if serie.empty:
+370:            continue
+371:
+372:        contagem = serie.value_counts().reset_index()
+373:        contagem.columns = ["Resposta", "Quantidade"]
+374:        contagem["%"] = (contagem["Quantidade"] / contagem["Quantidade"].sum() * 100).round(1)
+375:        contagem["Texto"] = (
+376:            contagem["Quantidade"].astype(str)
+377:            + " ("
+378:            + contagem["%"].astype(str)
+379:            + "%)"
+380:        )
+381:
+382:        titulo = labels.get(coluna_upper, coluna)
+383:
+384:        fig = px.bar(
+385:            contagem.sort_values("Quantidade", ascending=True),
+386:            x="Quantidade",
+387:            y="Resposta",
+388:            orientation="h",
+389:            text="Texto",
+390:            title=titulo
+391:        )
+392:
+393:        fig = tema_fig(fig)
+394:
+395:        tabela_respostas = dash_table.DataTable(
+396:            data=contagem.to_dict("records"),
+397:            columns=[
+398:                {"name": "Resposta", "id": "Resposta"},
+399:                {"name": "Quantidade", "id": "Quantidade"},
+400:                {"name": "%", "id": "%"},
+401:            ],
+402:            style_table={"overflowX": "auto"},
+403:            style_header={
+404:                "backgroundColor": "#020617",
+405:                "color": "white",
+406:                "fontWeight": "bold",
+407:                "border": "1px solid #1f2937"
+408:            },
+409:            style_cell={
+410:                "backgroundColor": "#111827",
+411:                "color": "#e5e7eb",
+412:                "border": "1px solid #1f2937",
+413:                "padding": "8px",
+414:                "textAlign": "left"
+415:            },
+416:            page_size=15
+417:        )
+418:
+419:        perguntas.append(
+420:            html.Div([
+421:                dcc.Graph(figure=fig),
+422:                html.H4("Tabela de respostas", style={"marginTop": "10px"}),
+423:                tabela_respostas
+424:            ], style={
+425:                "background": "#111827",
+426:                "borderRadius": "18px",
+427:                "border": "1px solid #1f2937",
+428:                "marginBottom": "18px",
+429:                "padding": "14px"
+430:            })
+431:        )
+432:
+433:    return perguntas
+434:
+435:# =========================
+436:# ÁUDIOS
+437:# =========================
+438:def carregar_audios(pesquisa_id):
+439:
+440:    try:
+441:        sql = """
+442:            SELECT
+443:                pesquisa_id,
+444:                submission_id,
+445:                entrevistador,
+446:                localidade,
+447:                data_entrevista,
+448:                nome_arquivo
+449:            FROM audios_entrevistas
+450:            WHERE pesquisa_id = %(pesquisa_id)s
+451:            ORDER BY id DESC
+452:            LIMIT 100
+453:        """
+454:
+455:        df = pd.read_sql(sql, engine, params={"pesquisa_id": pesquisa_id})
+456:
+457:        if df.empty:
+458:            return html.Div("Nenhum áudio disponível nesta pesquisa.", style={"color": "#9ca3af"})
+459:
+460:        linhas = []
+461:
+462:        for _, row in df.iterrows():
+463:            audio_src = f"/audio/{row['pesquisa_id']}/{row['submission_id']}/{row['nome_arquivo']}"
+464:
+465:            linhas.append(html.Tr([
+466:                html.Td(row["entrevistador"]),
+467:                html.Td(row["localidade"]),
+468:                html.Td(str(row["data_entrevista"])),
+469:                html.Td( html.Audio(
+470:                            src=audio_src,
+471:                            controls=True,
+472:                            style={"width": "300px"}
+473:                        ))
+474:            ]))
+475:
+476:        return html.Table([
+477:            html.Thead(html.Tr([
+478:                html.Th("Entrevistador"),
+479:                html.Th("Localidade"),
+480:                html.Th("Data"),
+481:                html.Th("Áudio")
+482:            ])),
+483:            html.Tbody(linhas)
+484:        ], style={"width": "100%", "color": "white"})
+485:
+486:    except Exception as e:
+487:        return html.Div(f"Erro ao carregar áudios: {e}")
+488:    
+489:# =========================
+490:# LAYOUT
+491:# =========================
+492:
+493:# =========================
+494:# LAYOUT POWER BI
+495:# =========================
+496:app.layout = html.Div([
+497:    dcc.Location(id="url"),
+498:    dcc.Store(id="secao-ativa", data="visao-geral"),
+499:
+500:    # SIDEBAR
+501:    html.Div([
+502:        html.H2([
+503:            html.Span("Ipsensus", style={"color": "#1e88ff"}),
+504:            html.Span(" Survey", style={"color": "white"})
+505:        ], style={"margin": "0", "fontSize": "24px"}),
+506:
+507:        html.Div("MENU", style={
+508:            "color": "#94a3b8",
+509:            "fontSize": "13px",
+510:            "marginTop": "30px",
+511:            "marginBottom": "12px"
+512:        }),
+513:
+514:        html.Button("📊 Visão Geral", id="btn-visao-geral", n_clicks=0, style={
+515:            "display": "block", "width": "100%", "textAlign": "left",
+516:            "background": "#2563eb", "padding": "12px",
+517:            "borderRadius": "8px", "marginBottom": "10px",
+518:            "fontWeight": "bold", "color": "white",
+519:            "border": "0", "cursor": "pointer"
+520:        }),
+521:
+522:        html.Button("📝 Entrevistas", id="btn-entrevistas", n_clicks=0, style={
+523:            "display": "block", "width": "100%", "textAlign": "left",
+524:            "padding": "10px", "color": "#cbd5e1",
+525:            "background": "transparent", "border": "0", "cursor": "pointer"
+526:        }),
+527:
+528:        html.Button("🗺️ Mapas", id="btn-mapas", n_clicks=0, style={
+529:            "display": "block", "width": "100%", "textAlign": "left",
+530:            "padding": "10px", "color": "#cbd5e1",
+531:            "background": "transparent", "border": "0", "cursor": "pointer"
+532:        }),
+533:
+534:        html.Button("📋 Perguntas", id="btn-perguntas", n_clicks=0, style={
+535:            "display": "block", "width": "100%", "textAlign": "left",
+536:            "padding": "10px", "color": "#cbd5e1",
+537:            "background": "transparent", "border": "0", "cursor": "pointer"
+538:        }),
+539:
+540:        html.Button("👥 Entrevistadores", id="btn-entrevistadores", n_clicks=0, style={
+541:            "display": "block", "width": "100%", "textAlign": "left",
+542:            "padding": "10px", "color": "#cbd5e1",
+543:            "background": "transparent", "border": "0", "cursor": "pointer"
+544:        }),
+545:
+546:        html.Button("📄 Relatórios", id="btn-relatorios", n_clicks=0, style={
+547:            "display": "block", "width": "100%", "textAlign": "left",
+548:            "padding": "10px", "color": "#cbd5e1",
+549:            "background": "transparent", "border": "0", "cursor": "pointer"
+550:        }),
+551:
+552:        html.Hr(style={"borderColor": "#1f2937", "marginTop": "25px"}),
+553:
+554:        html.Div("FILTROS", style={
+555:            "color": "#94a3b8",
+556:            "fontSize": "13px",
+557:            "marginBottom": "12px"
+558:        }),
+559:
+560:        html.Label("Pesquisa", style={"fontSize": "13px"}),
+561:        dcc.Dropdown(
+562:            id="pesquisa",
+563:            options=[],
+564:            value=None,
+565:            placeholder="Selecione",
+566:            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+567:        ),
+568:
+569:        html.Label("Localidade", style={"fontSize": "13px"}),
+570:        dcc.Dropdown(
+571:            id="filtro-localidade",
+572:            options=[],
+573:            value=None,
+574:            placeholder="Todas",
+575:            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+576:        ),
+577:
+578:        html.Label("Entrevistador", style={"fontSize": "13px"}),
+579:        dcc.Dropdown(
+580:            id="filtro-entrevistador",
+581:            options=[],
+582:            value=None,
+583:            placeholder="Todos",
+584:            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+585:        ),
+586:
+587:        html.Label("Pergunta para análise", style={"fontSize": "13px"}),
+588:        dcc.Dropdown(
+589:            id="pergunta-mapa",
+590:            options=[],
+591:            value=None,
+592:            placeholder="Selecione uma pergunta",
+593:            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+594:        ),
+595:
+596:        html.Label("Tipo de Mapa", style={"fontSize": "13px"}),
+597:        dcc.Dropdown(
+598:            id="tipo-mapa",
+599:            options=[
+600:                {"label": "Mapa de Pontos", "value": "pontos"},
+601:                {"label": "Mapa de Calor", "value": "calor"},
+602:            ],
+603:            value="pontos",
+604:            clearable=False,
+605:            style={"color": "#111827", "marginTop": "6px", "marginBottom": "16px"}
+606:        ),
+607:
+608:        html.A("Sair", href="/logout", style={
+609:            "display": "block",
+610:            "marginTop": "25px",
+611:            "color": "white",
+612:            "background": "#dc2626",
+613:            "padding": "10px",
+614:            "borderRadius": "8px",
+615:            "textAlign": "center",
+616:            "textDecoration": "none"
+617:        }),
+618:
+619:    ], style={
+620:        "position": "fixed",
+621:        "left": "0",
+622:        "top": "0",
+623:        "bottom": "0",
+624:        "width": "260px",
+625:        "background": "#020617",
+626:        "padding": "24px 16px",
+627:        "borderRight": "1px solid #1f2937",
+628:        "color": "white",
+629:        "overflowY": "auto"
+630:    }),
+631:
+632:    # CONTEÚDO PRINCIPAL
+633:        html.Div([
+634:
+635:            html.Div([
+636:                html.Div([
+637:                    html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+638:
+639:                    html.Div(id="debug-secao", style={
+640:                        "color": "yellow",
+641:                        "fontWeight": "bold",
+642:                        "marginBottom": "10px"
+643:                    }),
+644:
+645:                    html.Div("Dados atualizados automaticamente", style={
+646:                        "color": "#94a3b8",
+647:                        "fontSize": "13px",
+648:                        "marginTop": "4px"
+649:                    }),
+650:                ]),
+651:
+652:                html.Div([
+653:                    html.Div(id="cliente-header", style={"color": "#cbd5e1"}),
+654:                    html.Div(id="pesquisa-header", style={
+655:                        "color": "#94a3b8",
+656:                        "fontSize": "12px",
+657:                        "marginTop": "6px",
+658:                        "textAlign": "right"
+659:                    })
+660:                ])
+661:            ], style={
+662:                "display": "flex",
+663:                "justifyContent": "space-between",
+664:                "alignItems": "center",
+665:                "marginBottom": "22px"
+666:            }),
+667:
+668:        html.Div([
+669:            html.Div(id="kpis", style={
+670:                "display": "grid",
+671:                "gridTemplateColumns": "repeat(4, 1fr)",
+672:                "gap": "18px",
+673:                "marginBottom": "20px"
+674:            }),
+675:
+676:            html.Div([
+677:                html.Div([dcc.Graph(id="grafico-sexo")], style={
+678:                    "background": "#111827",
+679:                    "borderRadius": "14px",
+680:                    "border": "1px solid #1f2937",
+681:                    "padding": "10px"
+682:                }),
+683:                html.Div([dcc.Graph(id="grafico-idade")], style={
+684:                    "background": "#111827",
+685:                    "borderRadius": "14px",
+686:                    "border": "1px solid #1f2937",
+687:                    "padding": "10px"
+688:                }),
+689:            ], style={
+690:                "display": "grid",
+691:                "gridTemplateColumns": "1fr 1fr",
+692:                "gap": "18px",
+693:                "marginBottom": "20px"
+694:            }),
+695:        ], id="secao-visao-geral"),
+696:
+697:        html.Div([
+698:            html.Div([dcc.Graph(id="mapa-gps")], style={
+699:                "background": "#111827",
+700:                "borderRadius": "14px",
+701:                "border": "1px solid #1f2937",
+702:                "padding": "10px"
+703:            }),
+704:        ], id="secao-mapas"),
+705:
+706:        html.Div([
+707:            html.H2("Resultados das Perguntas", style={"marginBottom": "16px"}),
+708:            html.Div(id="perguntas-dinamicas")
+709:        ], id="secao-perguntas"),
+710:
+711:        html.Div([
+712:            html.H3("Desempenho por Entrevistador", style={"marginTop": "0"}),
+713:            html.Div(id="tabela-entrevistador")
+714:        ], id="secao-entrevistadores", style={
+715:            "background": "#111827",
+716:            "borderRadius": "14px",
+717:            "border": "1px solid #1f2937",
+718:            "padding": "18px"
+719:        }),
+720:
+721:        html.Div([
+722:            html.H2("Entrevistas / Auditoria", style={
+723:                "marginTop": "0",
+724:                "marginBottom": "16px"
+725:            }),
+726:            html.H3("Lista de Entrevistas"),
+727:            html.Div(id="tabela-entrevistas", style={"marginBottom": "25px"}),
+728:
+729:            html.H3("Auditoria de Áudios"),
+730:            html.Div(id="audios-entrevistas")
+731:        ], id="secao-entrevistas", style={
+732:            "background": "#111827",
+733:            "borderRadius": "14px",
+734:            "border": "1px solid #1f2937",
+735:            "padding": "20px",
+736:            "marginTop": "20px"
+737:        }),
+738:
+739:        html.Div([
+740:            html.H2("Relatórios", style={
+741:                "marginTop": "0",
+742:                "marginBottom": "16px"
+743:            }),
+744:
+745:            html.Div([
+746:                html.A(
+747:                    "📥 Exportar base da pesquisa em Excel",
+748:                    id="link-exportar-excel",
+749:                    href="#",
+750:                    target="_blank",
+751:                    style={
+752:                        "display": "inline-block",
+753:                        "background": "#2563eb",
+754:                        "color": "white",
+755:                        "padding": "12px 18px",
+756:                        "borderRadius": "10px",
+757:                        "textDecoration": "none",
+758:                        "fontWeight": "bold"
+759:                    }
+760:                ),
+761:
+762:            
+763:
+764:                html.A(
+765:                    "📄 Gerar Relatório PDF",
+766:                    id="link-gerar-pdf",
+767:                    href="#",
+768:                    target="_blank",
+769:                    style={
+770:                        "display": "inline-block",
+771:                        "background": "#16a34a",
+772:                        "color": "white",
+773:                        "padding": "12px 18px",
+774:                        "borderRadius": "10px",
+775:                        "textDecoration": "none",
+776:                        "fontWeight": "bold",
+777:                        "marginLeft": "10px"
+778:                    }
+779:                )
+780:
+781:            ], style={
+782:                "background": "#111827",
+783:                "borderRadius": "14px",
+784:                "border": "1px solid #1f2937",
+785:                "padding": "20px",
+786:                "color": "#cbd5e1"
+787:            })
+788:        ], id="secao-relatorios"),
+789:
+790:    ], style={
+791:        "marginLeft": "260px",
+792:        "padding": "24px",
+793:        "background": "#0f172a",
+794:        "minHeight": "100vh",
+795:        "color": "#e5e7eb",
+796:        "fontFamily": "Arial, sans-serif"
+797:    })
+798:
+799:])
+800:
+801:# =========================
+802:# CALLBACK PESQUISAS
+803:# =========================
+804:@app.callback(
+805:    Output("debug-secao", "children"),
+806:    Input("secao-ativa", "data")
+807:)
+808:    return f"SEÇÃO ATIVA: {secao}"
+809:
+810:@app.callback(
+811:    [
+812:        Output("pesquisa", "options"),
+813:        Output("pesquisa", "value"),
+814:        Output("cliente-header", "children"),
+815:    ],
+816:    Input("url", "pathname")
+817:)
+818:def inicializar_dashboard(pathname):
+819:    cliente_id = session.get("cliente_id")
+820:
+821:    if not cliente_id:
+822:        return [], None, ""
+823:
+824:    cliente = get_cliente(cliente_id)
+825:    options = lista_pesquisas(cliente_id)
+826:    valor_inicial = options[0]["value"] if options else None
+827:
+828:    logo = cliente.get("logo")
+829:    header = html.Div([
+830:        html.Img(
+831:            src=logo,
+832:            style={
+833:                "height": "45px",
+834:                "marginRight": "12px",
+835:                "borderRadius": "8px",
+836:                "objectFit": "contain",
+837:                "background": "white"
+838:            }
+839:        ) if logo else None,
+840:
+841:        html.Div([
+842:            html.Div(f"Cliente: {cliente['nome']}", style={
+843:                "fontWeight": "bold",
+844:                "fontSize": "15px"
+845:            }),
+846:            html.Div("Ipsensus Survey", style={
+847:                "fontSize": "13px",
+848:                "color": "#38bdf8",
+849:                "fontWeight": "bold",
+850:                "marginTop": "2px"
+851:            }),
+852:            html.Div("Dashboard de pesquisas em andamento", style={
+853:                "fontSize": "12px",
+854:                "color": "#94a3b8",
+855:                "marginTop": "2px"
+856:            })
+857:        ])
+858:    ], style={
+859:        "display": "flex",
+860:        "alignItems": "center",
+861:        "gap": "10px"
+862:    })
+863:
+864:    return options, valor_inicial, header
+865:
+866:
+867:# =========================
+868:# CALLBACK DASHBOARD
+869:
+870:@app.callback(
+871:    [
+872:        Output("kpis", "children"),
+873:        Output("grafico-sexo", "figure"),
+874:        Output("grafico-idade", "figure"),
+875:        Output("mapa-gps", "figure"),
+876:        Output("tabela-entrevistador", "children"),
+877:        Output("tabela-entrevistas", "children"),
+878:        Output("perguntas-dinamicas", "children"),
+879:        Output("audios-entrevistas", "children"),
+880:        Output("filtro-localidade", "options"),
+881:        Output("filtro-entrevistador", "options"),
+882:        Output("pergunta-mapa", "options"),
+883:        Output("pesquisa-header", "children"),
+884:    ],
+885:    [
+886:        Input("pesquisa", "value"),
+887:        Input("filtro-localidade", "value"),
+888:        Input("filtro-entrevistador", "value"),
+889:        Input("pergunta-mapa", "value"),
+890:        Input("tipo-mapa", "value"),
+891:    ]
+892:)
+893:def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pergunta_mapa, tipo_mapa):
+894:    
+895:    if not pesquisa_id:
+896:        fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
+897:        return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", "", [], [], [], ""
+898:
+899:    df = carregar_dados(pesquisa_id)
+900:
+901:    if df.empty:
+902:        fig_vazio = tema_fig(px.bar(title="Sem dados"))
+903:        return [
+904:            card("Total", "0", "Sem entrevistas")
+905:        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", "", [], [], [], ""
+906:
+907:    opcoes_localidade = [
+908:        {"label": x, "value": x}
+909:        for x in sorted(df["localidade"].dropna().unique())
+910:    ]
+911:
+912:    opcoes_entrevistador = [
+913:        {"label": x, "value": x}
+914:        for x in sorted(df["entrevistador"].dropna().unique())
+915:    ]
+916:
+917:    if filtro_localidade:
+918:        df = df[df["localidade"] == filtro_localidade]
+919:
+920:    if filtro_entrevistador:
+921:        df = df[df["entrevistador"] == filtro_entrevistador]
+922:
+923:    if df.empty:
+924:        fig_vazio = tema_fig(px.bar(title="Sem dados para o filtro selecionado"))
+925:        return [
+926:            card("Total", "0", "Filtro sem entrevistas")
+927:        ], fig_vazio, fig_vazio, fig_vazio, "Sem dados", "", "", "", opcoes_localidade, opcoes_entrevistador, [], ""
+928:
+929:    total = len(df)
+930:    entrevistadores = df["entrevistador"].nunique()
+931:
+932:    masc = int((df["sexo"] == "Masculino").sum())
+933:    fem = int((df["sexo"] == "Feminino").sum())
+934:
+935:    masc_pct = round((masc / total) * 100, 1) if total else 0
+936:    fem_pct = round((fem / total) * 100, 1) if total else 0
+937:
+938:    kpis = [
+939:        card("Entrevistas realizadas", f"{total:,}".replace(",", "."), "Amostra filtrada", "#1d4ed8"),
+940:        card("Masculino", f"{masc_pct}%", f"{masc} entrevistas", "#0f766e"),
+941:        card("Feminino", f"{fem_pct}%", f"{fem} entrevistas", "#be185d"),
+942:        card("Entrevistadores", entrevistadores, "Equipe em campo", "#7e22ce"),
+943:    ]
+944:
+945:    sexo_df = df["sexo"].value_counts().reset_index()
+946:    sexo_df.columns = ["Sexo", "Quantidade"]
+947:
+948:    fig_sexo = px.pie(
+949:        sexo_df,
+950:        names="Sexo",
+951:        values="Quantidade",
+952:        title="Distribuição por Sexo",
+953:        hole=0.45
+954:    )
+955:    fig_sexo = tema_fig(fig_sexo)
+956:
+957:    idade_ordem = [
+958:        "16 a 24 anos",
+959:        "25 a 34 anos",
+960:        "35 a 44 anos",
+961:        "45 a 59 anos",
+962:        "60 anos ou mais",
+963:        "Não informado"
+964:    ]
+965:
+966:    idade_df = df["idade"].value_counts().reset_index()
+967:    idade_df.columns = ["Faixa Etária", "Quantidade"]
+968:    idade_df["Faixa Etária"] = pd.Categorical(
+969:        idade_df["Faixa Etária"],
+970:        categories=idade_ordem,
+971:        ordered=True
+972:    )
+973:    idade_df = idade_df.sort_values("Faixa Etária")
+974:
+975:    fig_idade = px.bar(
+976:        idade_df,
+977:        x="Faixa Etária",
+978:        y="Quantidade",
+979:        text="Quantidade",
+980:        title="Distribuição por Faixa Etária"
+981:    )
+982:    fig_idade = tema_fig(fig_idade)
+983:
+984:    ent_df = df["entrevistador"].value_counts().reset_index()
+985:    ent_df.columns = ["Entrevistador", "Quantidade"]
+986:    ent_df["%"] = (ent_df["Quantidade"] / total * 100).round(1)
+987:
+988:    tabela_ent = dash_table.DataTable(
+989:        data=ent_df.to_dict("records"),
+990:        columns=[{"name": c, "id": c} for c in ent_df.columns],
+991:        style_table={"overflowX": "auto"},
+992:        style_header={
+993:            "backgroundColor": "#020617",
+994:            "color": "white",
+995:            "fontWeight": "bold",
+996:            "border": "1px solid #1f2937"
+997:        },
+998:        style_cell={
+999:            "backgroundColor": "#111827",
+1000:            "color": "#e5e7eb",
+1001:            "border": "1px solid #1f2937",
+1002:            "padding": "10px",
+1003:            "textAlign": "left"
+1004:        },
+1005:        page_size=10
+1006:    )
+1007:
+1008:    tabela_entrevistas = dash_table.DataTable(
+1009:        data=df[[
+1010:            "id",
+1011:            "submission_id",
+1012:            "entrevistador",
+1013:            "localidade",
+1014:            "sexo",
+1015:            "idade"
+1016:        ]].head(300).to_dict("records"),
+1017:        columns=[
+1018:            {"name": "ID", "id": "id"},
+1019:            {"name": "Submission", "id": "submission_id"},
+1020:            {"name": "Entrevistador", "id": "entrevistador"},
+1021:            {"name": "Localidade", "id": "localidade"},
+1022:            {"name": "Sexo", "id": "sexo"},
+1023:            {"name": "Idade", "id": "idade"},
+1024:        ],
+1025:        page_size=15,
+1026:        filter_action="native",
+1027:        sort_action="native",
+1028:        style_table={"overflowX": "auto"},
+1029:        style_header={
+1030:            "backgroundColor": "#020617",
+1031:            "color": "white",
+1032:            "fontWeight": "bold",
+1033:            "border": "1px solid #1f2937"
+1034:        },
+1035:        style_cell={
+1036:            "backgroundColor": "#111827",
+1037:            "color": "#e5e7eb",
+1038:            "border": "1px solid #1f2937",
+1039:            "padding": "8px",
+1040:            "fontSize": "12px",
+1041:            "textAlign": "left",
+1042:            "maxWidth": "220px",
+1043:            "overflow": "hidden",
+1044:            "textOverflow": "ellipsis"
+1045:        },
+1046:    )    
+1047:
+1048:    gps_df = extrair_gps(df)
+1049:
+1050:    if not gps_df.empty and pergunta_mapa:
+1051:        mapa_respostas = {}
+1052:
+1053:        for _, row in df.iterrows():
+1054:            dados = normalizar_json(row.get("dados"))
+1055:            submission = row.get("submission_id")
+1056:            mapa_respostas[submission] = dados.get(pergunta_mapa)
+1057:
+1058:        gps_df["resposta_mapa"] = gps_df["submission_id"].map(mapa_respostas)
+1059:
+1060:    if gps_df.empty:
+1061:
+1062:        fig_mapa = tema_fig(
+1063:            px.scatter(title="Sem GPS disponível nesta pesquisa")
+1064:        )
+1065:
+1066:    else:
+1067:
+1068:        if tipo_mapa == "calor":
+1069:
+1070:            fig_mapa = px.density_mapbox(
+1071:                gps_df,
+1072:                lat="lat",
+1073:                lon="lon",
+1074:                radius=35,
+1075:                zoom=12,
+1076:                height=650,
+1077:                title="Mapa de Calor das Entrevistas"
+1078:            )
+1079:
+1080:        elif pergunta_mapa and "resposta_mapa" in gps_df.columns:
+1081:
+1082:            gps_df["resposta_mapa"] = gps_df["resposta_mapa"].fillna("Não informado")
+1083:
+1084:            fig_mapa = px.scatter_mapbox(
+1085:                gps_df,
+1086:                lat="lat",
+1087:                lon="lon",
+1088:                color="resposta_mapa",
+1089:
+1090:                color_discrete_map={
+1091:                    resposta: cor_resposta_mapa(resposta)
+1092:                    for resposta in gps_df["resposta_mapa"].unique()
+1093:                },
+1094:
+1095:                hover_name="localidade",
+1096:                hover_data=[
+1097:                    "entrevistador",
+1098:                    "accuracy",
+1099:                    "resposta_mapa"
+1100:                ],
+1101:                zoom=12,
+1102:                height=650,
+1103:                title="Mapa por Resposta da Pergunta"
+1104:            )
+1105:        else:
+1106:
+1107:            fig_mapa = px.scatter_mapbox(
+1108:                gps_df,
+1109:                lat="lat",
+1110:                lon="lon",
+1111:                hover_name="localidade",
+1112:                hover_data=[
+1113:                    "entrevistador",
+1114:                    "accuracy"
+1115:                ],
+1116:                zoom=12,
+1117:                height=650,
+1118:                size=[14] * len(gps_df),
+1119:                title="Mapa de Pontos das Entrevistas"
+1120:            )
+1121:
+1122:        fig_mapa.update_layout(
+1123:            mapbox_style="open-street-map",
+1124:            paper_bgcolor="#111827",
+1125:            plot_bgcolor="#111827",
+1126:            font_color="#e5e7eb",
+1127:            margin=dict(l=0, r=0, t=50, b=0)
+1128:        )
+1129:
+1130:    perguntas = gerar_graficos_perguntas(df, pesquisa_id, pergunta_mapa)
+1131:    audios = carregar_audios(pesquisa_id)
+1132:
+1133:    if not perguntas:
+1134:        perguntas = [
+1135:            html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+1136:                "background": "#111827",
+1137:                "padding": "20px",
+1138:                "borderRadius": "18px"
+1139:            })
+1140:        ]
+1141:    perguntas_mapa_df = pd.read_sql(
+1142:        text("""
+1143:            SELECT UPPER(name) AS name, label
+1144:            FROM perguntas_pesquisa
+1145:            WHERE pesquisa_id = :pesquisa_id
+1146:            AND exibir_dashboard = true
+1147:            ORDER BY id
+1148:        """),
+1149:        engine,
+1150:        params={"pesquisa_id": pesquisa_id}
+1151:    )
+1152:
+1153:    opcoes_pergunta_mapa = [
+1154:        {"label": row["label"], "value": row["name"]}
+1155:        for _, row in perguntas_mapa_df.iterrows()
+1156:    ]
+1157:    
+1158:    pesquisa_nome = ""
+1159:
+1160:    try:
+1161:        pesquisa_nome = [
+1162:            opt["label"]
+1163:            for opt in lista_pesquisas(session.get("cliente_id"))
+1164:            if opt["value"] == pesquisa_id
+1165:        ][0]
+1166:    except:
+1167:        pesquisa_nome = f"Pesquisa ID {pesquisa_id}"
+1168:
+1169:    pesquisa_header = html.Div([
+1170:        html.Div(f"Pesquisa: {pesquisa_nome}"),
+1171:        html.Div(f"Entrevistas filtradas: {total}")
+1172:    ])
+1173:    return (
+1174:        kpis,
+1175:        fig_sexo,
+1176:        fig_idade,
+1177:        fig_mapa,
+1178:        tabela_ent,
+1179:        tabela_entrevistas,
+1180:        perguntas,
+1181:        audios,
+1182:        opcoes_localidade,
+1183:        opcoes_entrevistador,
+1184:        opcoes_pergunta_mapa,
+1185:        pesquisa_header
+1186:    )
+1187:
+1188:ODK_URL = "https://app.ar7pesquisas.com.br"
+1189:ODK_USER = "augusto.estatistico@gmail.com"
+1190:ODK_PASS = "@Mat050dois"
+1191:
+1192:@app.callback(
+1193:    Output("link-exportar-excel", "href"),
+1194:    Input("pesquisa", "value")
+1195:)
+1196:def atualizar_link_excel(pesquisa_id):
+1197:
+1198:    if not pesquisa_id:
+1199:        return "#"
+1200:
+1201:    return f"/exportar_excel/{pesquisa_id}"
+1202:
+1203:@app.callback(
+1204:    Output("link-gerar-pdf", "href"),
+1205:    Input("pesquisa", "value")
+1206:)
+1207:def atualizar_link_pdf(pesquisa_id):
+1208:
+1209:    if not pesquisa_id:
+1210:        return "#"
+1211:
+1212:    return f"/gerar_pdf/{pesquisa_id}"
+1213:
+1214:
+1215:# =========================
+1216:# CALLBACK MENU POR SEÇÃO
+1217:# =========================
+1218:@app.callback(
+1219:    Output("secao-ativa", "data"),
+1220:    [
+1221:        Input("btn-visao-geral", "n_clicks"),
+1222:        Input("btn-entrevistas", "n_clicks"),
+1223:        Input("btn-mapas", "n_clicks"),
+1224:        Input("btn-perguntas", "n_clicks"),
+1225:        Input("btn-entrevistadores", "n_clicks"),
+1226:        Input("btn-relatorios", "n_clicks"),
+1227:    ]
+1228:)
+1229:def mudar_secao(n1, n2, n3, n4, n5, n6):
+1230:    ctx = dash.callback_context
+1231:
+1232:    if not ctx.triggered:
+1233:        return "visao-geral"
+1234:
+1235:    botao = ctx.triggered[0]["prop_id"].split(".")[0]
+1236:
+1237:    mapa = {
+1238:        "btn-visao-geral": "visao-geral",
+1239:        "btn-entrevistas": "entrevistas",
+1240:        "btn-mapas": "mapas",
+1241:        "btn-perguntas": "perguntas",
+1242:        "btn-entrevistadores": "entrevistadores",
+1243:        "btn-relatorios": "relatorios",
+1244:    }
+1245:
+1246:    return mapa.get(botao, "visao-geral")
+1247:
+1248:
+1249:@app.callback(
+1250:    [
+1251:        Output("secao-visao-geral", "style"),
+1252:        Output("secao-entrevistas", "style"),
+1253:        Output("secao-mapas", "style"),
+1254:        Output("secao-perguntas", "style"),
+1255:        Output("secao-entrevistadores", "style"),
+1256:        Output("secao-relatorios", "style"),
+1257:    ],
+1258:    Input("secao-ativa", "data")
+1259:)
+1260:def exibir_secao(secao):
+1261:    base = {"display": "block", "marginBottom": "20px"}
+1262:    oculto = {"display": "none"}
+1263:
+1264:    style_entrevistas = {
+1265:        "display": "block",
+1266:        "background": "#111827",
+1267:        "borderRadius": "14px",
+1268:        "border": "1px solid #1f2937",
+1269:        "padding": "20px",
+1270:        "marginTop": "20px"
+1271:    }
+1272:
+1273:    style_entrevistadores = {
+1274:        "display": "block",
+1275:        "background": "#111827",
+1276:        "borderRadius": "14px",
+1277:        "border": "1px solid #1f2937",
+1278:        "padding": "18px"
+1279:    }
+1280:
+1281:    return (
+1282:        base if secao == "visao-geral" else oculto,
+1283:        style_entrevistas if secao == "entrevistas" else oculto,
+1284:        base if secao == "mapas" else oculto,
+1285:        base if secao == "perguntas" else oculto,
+1286:        style_entrevistadores if secao == "entrevistadores" else oculto,
+1287:        base if secao == "relatorios" else oculto,
+1288:    )
+1289:
+1290:# =========================
+1291:# AUDIO ENDPOINT
+1292:# =========================
+1293:@server.route("/audio/<int:pesquisa_id>/<path:submission_id>/<path:nome_arquivo>")
+1294:def ouvir_audio(pesquisa_id, submission_id, nome_arquivo):
+1295:
+1296:    if "cliente_id" not in session:
+1297:        return "Não autorizado", 403
+1298:
+1299:    df = pd.read_sql(
+1300:        text("""
+1301:            SELECT projeto_odk, form_id
+1302:            FROM pesquisas
+1303:            WHERE id = :pesquisa_id
+1304:        """),
+1305:        engine,
+1306:        params={"pesquisa_id": pesquisa_id}
+1307:    )
+1308:
+1309:    if df.empty:
+1310:        return "Pesquisa não encontrada", 404
+1311:
+1312:    projeto_odk = df.iloc[0]["projeto_odk"]
+1313:    form_id = df.iloc[0]["form_id"]
+1314:
+1315:    import urllib.parse
+1316:    import tempfile
+1317:    import subprocess
+1318:    import requests
+1319:    from requests.auth import HTTPBasicAuth
+1320:
+1321:    submission_encoded = urllib.parse.quote(submission_id, safe="")
+1322:    arquivo_encoded = urllib.parse.quote(nome_arquivo, safe="")
+1323:
+1324:    url = (
+1325:        f"https://app.ar7pesquisas.com.br/v1/projects/{projeto_odk}"
+1326:        f"/forms/{form_id}"
+1327:        f"/submissions/{submission_encoded}"
+1328:        f"/attachments/{arquivo_encoded}"
+1329:    )
+1330:
+1331:    r = requests.get(
+1332:        url,
+1333:        auth=HTTPBasicAuth(
+1334:            "augusto.estatistico@gmail.com",
+1335:            "@Mat050dois"
+1336:        )
+1337:    )
+1338:
+1339:    if r.status_code != 200:
+1340:        return f"Erro ao buscar áudio: {r.status_code}", 500
+1341:
+1342:    with tempfile.NamedTemporaryFile(suffix=".amr", delete=False) as entrada:
+1343:        entrada.write(r.content)
+1344:        entrada_path = entrada.name
+1345:
+1346:    saida_path = entrada_path.replace(".amr", ".mp3")
+1347:
+1348:    processo = subprocess.run(
+1349:        [
+1350:            "ffmpeg",
+1351:            "-y",
+1352:            "-i", entrada_path,
+1353:            "-acodec", "libmp3lame",
+1354:            "-ab", "64k",
+1355:            saida_path
+1356:        ],
+1357:        capture_output=True,
+1358:        text=True
+1359:    )
+1360:
+1361:    if processo.returncode != 0:
+1362:        return f"Erro ao converter áudio: {processo.stderr}", 500
+1363:
+1364:    with open(saida_path, "rb") as f:
+1365:        audio_mp3 = f.read()
+1366:
+1367:    return Response(
+1368:        audio_mp3,
+1369:        mimetype="audio/mpeg"
+1370:    )
+1371:# =========================
+1372:# EXPORTAR EXCEL
+1373:# =========================
+1374:@server.route("/exportar_excel/<int:pesquisa_id>")
+1375:def exportar_excel(pesquisa_id):
+1376:
+1377:    if "cliente_id" not in session:
+1378:        return "Não autorizado", 403
+1379:
+1380:    df = carregar_dados(pesquisa_id)
+1381:
+1382:    if df.empty:
+1383:        return "Sem dados", 404
+1384:
+1385:    dados_json = df["dados"].apply(normalizar_json)
+1386:    json_df = pd.json_normalize(dados_json)
+1387:
+1388:    df_export = pd.concat(
+1389:        [df.drop(columns=["dados"]), json_df],
+1390:        axis=1
+1391:    )
+1392:
+1393:    import io
+1394:
+1395:    output = io.BytesIO()
+1396:
+1397:    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+1398:        df_export.to_excel(writer, index=False, sheet_name="base")
+1399:
+1400:    output.seek(0)
+1401:
+1402:    return Response(
+1403:        output.getvalue(),
+1404:        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+1405:        headers={
+1406:            "Content-Disposition": f"attachment; filename=pesquisa_{pesquisa_id}.xlsx"
+1407:        }
+1408:    )
+1409:# =========================
+1410:# GERAR PDF
+1411:# =========================
+1412:@server.route("/gerar_pdf/<int:pesquisa_id>")
+1413:def gerar_pdf(pesquisa_id):
+1414:
+1415:    if "cliente_id" not in session:
+1416:        return "Não autorizado", 403
+1417:
+1418:    df = carregar_dados(pesquisa_id)
+1419:
+1420:    if df.empty:
+1421:        return "Sem dados", 404
+1422:
+1423:    buffer = io.BytesIO()
+1424:
+1425:    doc = SimpleDocTemplate(buffer)
+1426:
+1427:    styles = getSampleStyleSheet()
+1428:
+1429:    elementos = []
+1430:
+1431:    elementos.append(
+1432:        Paragraph(
+1433:            f"<b>Relatório da Pesquisa {pesquisa_id}</b>",
+1434:            styles["Title"]
+1435:        )
+1436:    )
+1437:
+1438:    elementos.append(Spacer(1, 20))
+1439:
+1440:    elementos.append(
+1441:        Paragraph(
+1442:            f"Total de entrevistas: {len(df)}",
+1443:            styles["Normal"]
+1444:        )
+1445:    )
+1446:
+1447:    doc.build(elementos)
+1448:
+1449:    buffer.seek(0)
+1450:
+1451:    return Response(
+1452:        buffer.getvalue(),
+1453:        mimetype="application/pdf",
+1454:        headers={
+1455:            "Content-Disposition":
+1456:            f"attachment; filename=relatorio_{pesquisa_id}.pdf"
+1457:        }
+1458:    )
+1459:
+1460:@server.route("/gerar_pdf/<int:pesquisa_id>")
+1461:def gerar_pdf(pesquisa_id):
+1462:
+1463:    if "cliente_id" not in session:
+1464:        return "Não autorizado", 403
+1465:
+1466:    df = carregar_dados(pesquisa_id)
+1467:
+1468:    if df.empty:
+1469:        return "Sem dados", 404
+1470:
+1471:    cliente = get_cliente(session.get("cliente_id"))
+1472:
+1473:    try:
+1474:        pesquisa_nome = [
+1475:            opt["label"]
+1476:            for opt in lista_pesquisas(session.get("cliente_id"))
+1477:            if opt["value"] == pesquisa_id
+1478:        ][0]
+1479:    except:
+1480:        pesquisa_nome = f"Pesquisa ID {pesquisa_id}"
+1481:
+1482:    dados_json = df["dados"].apply(normalizar_json)
+1483:    json_df = pd.json_normalize(dados_json)
+1484:
+1485:    perguntas_df = pd.read_sql(
+1486:        text("""
+1487:            SELECT UPPER(name) AS name, label
+1488:            FROM perguntas_pesquisa
+1489:            WHERE pesquisa_id = :pesquisa_id
+1490:            AND exibir_dashboard = true
+1491:            ORDER BY id
+1492:        """),
+1493:        engine,
+1494:        params={"pesquisa_id": pesquisa_id}
+1495:    )
+1496:
+1497:    buffer = io.BytesIO()
+1498:    doc = SimpleDocTemplate(
+1499:        buffer,
+1500:        rightMargin=40,
+1501:        leftMargin=40,
+1502:        topMargin=40,
+1503:        bottomMargin=40
+1504:    )
+1505:
+1506:    styles = getSampleStyleSheet()
+1507:    elementos = []
+1508:
+1509:    elementos.append(Paragraph("<b>RELATÓRIO DE PESQUISA</b>", styles["Title"]))
+1510:    elementos.append(Spacer(1, 18))
+1511:    elementos.append(Paragraph(f"<b>Cliente:</b> {cliente['nome']}", styles["Normal"]))
+1512:    elementos.append(Paragraph(f"<b>Pesquisa:</b> {pesquisa_nome}", styles["Normal"]))
+1513:    elementos.append(Paragraph(f"<b>Total de entrevistas:</b> {len(df)}", styles["Normal"]))
+1514:    elementos.append(Spacer(1, 24))
+1515:
+1516:    elementos.append(Paragraph("<b>1. Resumo Executivo</b>", styles["Heading1"]))
+1517:
+1518:    total = len(df)
+1519:    masc = int((df["sexo"] == "Masculino").sum())
+1520:    fem = int((df["sexo"] == "Feminino").sum())
+1521:    entrevistadores = df["entrevistador"].nunique()
+1522:
+1523:    masc_pct = round(masc / total * 100, 1) if total else 0
+1524:    fem_pct = round(fem / total * 100, 1) if total else 0
+1525:
+1526:    elementos.append(Paragraph(f"Entrevistas realizadas: <b>{total}</b>", styles["Normal"]))
+1527:    elementos.append(Paragraph(f"Masculino: <b>{masc}</b> entrevistas ({masc_pct}%)", styles["Normal"]))
+1528:    elementos.append(Paragraph(f"Feminino: <b>{fem}</b> entrevistas ({fem_pct}%)", styles["Normal"]))
+1529:    elementos.append(Paragraph(f"Entrevistadores em campo: <b>{entrevistadores}</b>", styles["Normal"]))
+1530:    elementos.append(Spacer(1, 18))
+1531:
+1532:    elementos.append(Paragraph("<b>2. Perfil da Amostra</b>", styles["Heading1"]))
+1533:
+1534:    for coluna, titulo in [
+1535:        ("sexo", "Sexo"),
+1536:        ("idade", "Faixa Etária"),
+1537:        ("localidade", "Localidade"),
+1538:        ("entrevistador", "Entrevistador")
+1539:    ]:
+1540:        elementos.append(Paragraph(f"<b>{titulo}</b>", styles["Heading2"]))
+1541:
+1542:        resumo = df[coluna].value_counts().reset_index()
+1543:        resumo.columns = ["Categoria", "Quantidade"]
+1544:
+1545:        for _, row in resumo.iterrows():
+1546:            pct = round(row["Quantidade"] / total * 100, 1)
+1547:            elementos.append(
+1548:                Paragraph(
+1549:                    f"{row['Categoria']}: {row['Quantidade']} ({pct}%)",
+1550:                    styles["Normal"]
+1551:                )
+1552:            )
+1553:
+1554:        elementos.append(Spacer(1, 10))
+1555:
+1556:    elementos.append(PageBreak())
+1557:
+1558:    elementos.append(Paragraph("<b>3. Resultados das Perguntas</b>", styles["Heading1"]))
+1559:
+1560:    for _, pergunta in perguntas_df.iterrows():
+1561:
+1562:        nome_coluna = pergunta["name"]
+1563:        label = pergunta["label"]
+1564:
+1565:        coluna_real = None
+1566:
+1567:        for c in json_df.columns:
+1568:            if c.upper() == nome_coluna:
+1569:                coluna_real = c
+1570:                break
+1571:
+1572:        if coluna_real is None:
+1573:            continue
+1574:
+1575:        serie = json_df[coluna_real].dropna().astype(str).str.strip()
+1576:        serie = serie[serie != ""]
+1577:
+1578:        if serie.empty:
+1579:            continue
+1580:
+1581:        elementos.append(Paragraph(f"<b>{label}</b>", styles["Heading2"]))
+1582:
+1583:        contagem = serie.value_counts().reset_index()
+1584:        contagem.columns = ["Resposta", "Quantidade"]
+1585:
+1586:        base = contagem["Quantidade"].sum()
+1587:
+1588:        for _, row in contagem.iterrows():
+1589:            pct = round(row["Quantidade"] / base * 100, 1)
+1590:            elementos.append(
+1591:                Paragraph(
+1592:                    f"{row['Resposta']}: {row['Quantidade']} ({pct}%)",
+1593:                    styles["Normal"]
+1594:                )
+1595:            )
+1596:
+1597:        elementos.append(Spacer(1, 14))
+1598:
+1599:    elementos.append(PageBreak())
+1600:
+1601:    elementos.append(Paragraph("<b>4. Observação Técnica</b>", styles["Heading1"]))
+1602:    elementos.append(Paragraph(
+1603:        "Relatório gerado automaticamente pela plataforma Ipsensus Survey, "
+1604:        "com base nos dados coletados via ODK, processados no banco Supabase "
+1605:        "e visualizados no dashboard operacional.",
+1606:        styles["Normal"]
+1607:    ))
+1608:
+1609:    doc.build(elementos)
+1610:
+1611:    buffer.seek(0)
+1612:
+1613:    return Response(
+1614:        buffer.getvalue(),
+1615:        mimetype="application/pdf",
+1616:        headers={
+1617:            "Content-Disposition": f"attachment; filename=relatorio_{pesquisa_id}.pdf"
+1618:        }
+1619:    )
+1620:
+1621:
+1622:# =========================
+1623:# RUN
+1624:# =========================
+1625:if __name__ == "__main__":
+1626:    port = int(os.environ.get("PORT", 8050))
+1627:    app.run(host="0.0.0.0", port=port)

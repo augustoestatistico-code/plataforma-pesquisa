@@ -171,413 +171,6 @@ def normalizar_json(valor):
 
     return {}
 
-# =========================
-# MOTOR DE INTELIGÊNCIA
-# =========================
-
-SEM_DIRECAO = {
-
-    "",
-    "NS",
-    "NS/NR",
-    "NÃO SABE",
-    "NAO SABE",
-    "NÃO SABE OPINAR",
-    "NAO SABE OPINAR",
-    "NÃO RESPONDEU",
-    "NAO RESPONDEU",
-    "NÃO QUIS RESPONDER",
-    "NAO QUIS RESPONDER",
-    "NÃO QUIS OPINAR",
-    "NAO QUIS OPINAR",
-    "SEM OPINIÃO",
-    "SEM OPINIAO",
-    "INDECISO",
-    "INDECISA",
-    "INDECISOS",
-    "BRANCO",
-    "NULO",
-    "BRANCO/NULO",
-    "NENHUM",
-    "NENHUMA",
-    "OUTRO",
-    "OUTROS",
-    "NR"
-}
-
-def eh_sem_direcao(valor):
-
-    if pd.isna(valor):
-        return True
-
-    txt = str(valor).strip().upper()
-
-    return txt in SEM_DIRECAO
-
-def pegar_perfil_predominante(df_filtrado, coluna):
-
-    if coluna not in df_filtrado.columns or df_filtrado.empty:
-        return "Não informado", 0
-
-    serie = df_filtrado[coluna].dropna().astype(str).str.strip()
-
-    if serie.empty:
-        return "Não informado", 0
-
-    contagem = serie.value_counts()
-    valor = contagem.idxmax()
-    pct = round((contagem.max() / len(serie)) * 100, 1)
-
-    return valor, pct
-
-
-def perfil_resposta(df, pergunta, resposta):
-
-    if "dados" not in df.columns:
-        return None
-
-    dados_json = df["dados"].apply(normalizar_json)
-    json_df = pd.json_normalize(dados_json)
-
-    coluna_real = None
-
-    for c in json_df.columns:
-        if c.upper() == pergunta.upper():
-            coluna_real = c
-            break
-
-    if coluna_real is None:
-        return None
-
-    mascara = json_df[coluna_real].astype(str).str.strip().str.upper() == str(resposta).strip().upper()
-
-    df_resp = df[mascara].copy()
-
-    if df_resp.empty:
-        return None
-
-    sexo, sexo_pct = pegar_perfil_predominante(df_resp, "sexo")
-    idade, idade_pct = pegar_perfil_predominante(df_resp, "idade")
-    localidade, localidade_pct = pegar_perfil_predominante(df_resp, "localidade")
-
-    escolaridade, escolaridade_pct = pegar_perfil_predominante(df_resp, "escolaridade")
-    renda, renda_pct = pegar_perfil_predominante(df_resp, "renda_familiar")
-    religiao, religiao_pct = pegar_perfil_predominante(df_resp, "religiao")
-    zona, zona_pct = pegar_perfil_predominante(df_resp, "zona")
-
-    return {
-        "total": len(df_resp),
-        "sexo": sexo,
-        "sexo_pct": sexo_pct,
-        "idade": idade,
-        "idade_pct": idade_pct,
-        "localidade": localidade,
-        "localidade_pct": localidade_pct,
-        "escolaridade": escolaridade,
-        "escolaridade_pct": escolaridade_pct,
-        "renda": renda,
-        "renda_pct": renda_pct,
-        "religiao": religiao,
-        "religiao_pct": religiao_pct,
-        "zona": zona,
-        "zona_pct": zona_pct,
-    }
-
-def calcular_desvios(df_filtrado, df_total, coluna):
-
-    if coluna not in df_total.columns:
-        return []
-
-    resultados = []
-
-    total_base = len(df_total)
-    total_filtrado = len(df_filtrado)
-
-    if total_base == 0 or total_filtrado == 0:
-        return []
-
-    categorias = set(
-        df_total[coluna].dropna().astype(str)
-    )
-
-    for categoria in categorias:
-
-        pct_total = (
-            (df_total[coluna].astype(str) == categoria).sum()
-            / total_base
-        ) * 100
-
-        pct_filtrado = (
-            (df_filtrado[coluna].astype(str) == categoria).sum()
-            / total_filtrado
-        ) * 100
-
-        desvio = round(
-            pct_filtrado - pct_total,
-            1
-        )
-
-        resultados.append(
-            (categoria, desvio)
-        )
-
-    resultados.sort(
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    return resultados
-
-def grupos_fortes(df, pergunta, resposta):
-
-    dados_json = df["dados"].apply(normalizar_json)
-    json_df = pd.json_normalize(dados_json)
-
-    coluna_real = None
-
-    for c in json_df.columns:
-        if c.upper() == pergunta.upper():
-            coluna_real = c
-            break
-
-    if coluna_real is None:
-        return []
-
-    mascara = (
-        json_df[coluna_real]
-        .astype(str)
-        .str.upper()
-        .str.strip()
-        ==
-        str(resposta).upper().strip()
-    )
-
-    df_resp = df[mascara]
-
-    destaques = []
-
-    for coluna in [
-        "sexo",
-        "idade",
-        "localidade",
-        "zona",
-        "escolaridade",
-        "renda_familiar",
-        "religiao"
-    ]:
-        desvios = calcular_desvios(
-            df_resp,
-            df,
-            coluna
-        )
-
-        if len(desvios):
-
-            categoria, valor = desvios[0]
-
-            if valor >= 5:
-
-                destaques.append(
-                    f"{categoria} (+{valor} pts)"
-                )
-
-    return destaques
-
-def grupos_fortes_fracos(df, pergunta, resposta):
-
-    dados_json = df["dados"].apply(normalizar_json)
-    json_df = pd.json_normalize(dados_json)
-
-    coluna_real = None
-
-    for c in json_df.columns:
-        if c.upper() == pergunta.upper():
-            coluna_real = c
-            break
-
-    if coluna_real is None:
-        return [], []
-
-    mascara = (
-        json_df[coluna_real]
-        .astype(str)
-        .str.upper()
-        .str.strip()
-        ==
-        str(resposta).upper().strip()
-    )
-
-    df_resp = df[mascara]
-
-    fortes = []
-    fracos = []
-
-    for coluna in [
-        "sexo",
-        "idade",
-        "localidade"
-    ]:
-
-        desvios = calcular_desvios(
-            df_resp,
-            df,
-            coluna
-        )
-
-        for categoria, valor in desvios:
-
-            if valor >= 5:
-                fortes.append(
-                    f"{categoria} (+{valor} pts)"
-                )
-
-            elif valor <= -5:
-                fracos.append(
-                    f"{categoria} ({valor} pts)"
-                )
-
-    return fortes[:3], fracos[:3]
-
-def normalizar_resposta(valor):
-
-    if pd.isna(valor):
-        return ""
-
-    txt = str(valor).strip()
-
-    if txt == "":
-        return ""
-
-    return txt.title()
-
-
-# =========================
-# CLASSIFICAÇÃO DE PERGUNTAS
-# =========================
-
-def classificar_pergunta(label):
-
-    txt = str(label).upper()
-
-    PERFIL = [
-        "SEXO",
-        "IDADE",
-        "ESCOLARIDADE",
-        "RENDA",
-        "RENDA_FAMILIAR",
-        "RELIGIAO",
-        "RELIGIÃO",
-        "ZONA",
-        "LOCALIDADE",
-        "BAIRRO",
-        "REGIAO",
-        "REGIÃO"
-    ]
-
-    ESTRATEGICAS = [
-        "PREFEITO",
-        "GOVERNADOR",
-        "PRESIDENTE",
-        "DEPUTADO",
-        "SENADOR",
-        "VOTO",
-        "ESPONT",
-        "ESTIMUL",
-        "REJEI",
-        "EM QUEM VOTARIA",
-        "INTENÇÃO",
-        "INTENCAO"
-    ]
-
-    ANALITICAS = [
-        "AVALIA",
-        "APROVA",
-        "DESAPROVA",
-        "PROBLEMA",
-        "PRIORIDADE",
-        "SAUDE",
-        "SAÚDE",
-        "EDUCAC",
-        "SEGURAN",
-        "TRANSPORTE",
-        "OBRAS",
-        "LIMPEZA"
-    ]
-
-    if any(x in txt for x in PERFIL):
-        return "PERFIL"
-
-    if any(x in txt for x in ESTRATEGICAS):
-        return "ESTRATEGICA"
-
-    if any(x in txt for x in ANALITICAS):
-        return "ANALITICA"
-
-    return "GERAL"
-
-def classificar_sentimento_resposta(valor):
-
-    txt = str(valor).strip().upper()
-
-    positivos = [
-        "APROVA",
-        "ÓTIMA",
-        "OTIMA",
-        "BOA",
-        "BOM",
-        "SIM",
-        "SATISFEITO",
-        "POSITIVO"
-    ]
-
-    negativos = [
-        "DESAPROVA",
-        "REPROVA",
-        "RUIM",
-        "PÉSSIMA",
-        "PESSIMA",
-        "NÃO",
-        "NAO",
-        "INSATISFEITO",
-        "NEGATIVO"
-    ]
-
-    neutros = [
-        "REGULAR",
-        "MAIS OU MENOS",
-        "NEUTRO"
-    ]
-
-    if any(x in txt for x in positivos):
-        return "POSITIVO"
-
-    if any(x in txt for x in negativos):
-        return "NEGATIVO"
-
-    if any(x in txt for x in neutros):
-        return "NEUTRO"
-
-    return "OUTRO"
-
-
-import unicodedata
-import re
-
-def normalizar_texto_aberto(texto):
-
-    if pd.isna(texto):
-        return ""
-
-    texto = str(texto).lower()
-
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = texto.encode("ascii", "ignore").decode("utf-8")
-
-    texto = re.sub(r"[^a-z0-9 ]", " ", texto)
-    texto = re.sub(r"\s+", " ", texto)
-
-    return texto.strip()
-
 
 def extrair_gps(df):
     pontos = []
@@ -1047,6 +640,13 @@ app.layout = html.Div([
             html.Div([
                 html.Div([
                     html.H2("Acompanhamento em Tempo Real", style={"margin": "0"}),
+
+                    html.Div(id="debug-secao", style={
+                        "color": "yellow",
+                        "fontWeight": "bold",
+                        "marginBottom": "10px"
+                    }),
+
                     html.Div("Dados atualizados automaticamente", style={
                         "color": "#94a3b8",
                         "fontSize": "13px",
@@ -1223,6 +823,13 @@ app.layout = html.Div([
 # =========================
 # CALLBACK PESQUISAS
 # =========================
+@app.callback(
+    Output("debug-secao", "children"),
+    Input("secao-ativa", "data")
+)
+def mostrar_secao(secao):
+    return f"SEÇÃO ATIVA: {secao}"
+
 @app.callback(
     [
         Output("pesquisa", "options"),
@@ -1601,468 +1208,6 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         pesquisa_header
     )
 
-# =========================
-# CALLBACK INTELIGÊNCIA
-# =========================
-@app.callback(
-    Output("inteligencia-conteudo", "children"),
-    Input("pesquisa", "value")
-)
-def gerar_inteligencia(pesquisa_id):
-
-    if not pesquisa_id:
-        return html.Div("Selecione uma pesquisa para gerar a inteligência.", style={"color": "#cbd5e1"})
-
-    df = carregar_dados(pesquisa_id)
-
-    if df.empty:
-        return html.Div("Sem dados para gerar inteligência.", style={"color": "#cbd5e1"})
-
-    total = len(df)
-
-    sexo_top = df["sexo"].value_counts().idxmax() if "sexo" in df.columns and not df["sexo"].empty else "Não informado"
-    idade_top = df["idade"].value_counts().idxmax() if "idade" in df.columns and not df["idade"].empty else "Não informado"
-    loc_top = df["localidade"].value_counts().idxmax() if "localidade" in df.columns and not df["localidade"].empty else "Não informado"
-   
-    pct_fem = round((df["sexo"].eq("Feminino").sum() / total) * 100, 1) if total else 0
-    pct_masc = round((df["sexo"].eq("Masculino").sum() / total) * 100, 1) if total else 0
-
-    sexo_dist = df["sexo"].value_counts().reset_index()
-    sexo_dist.columns = ["Sexo", "Entrevistas"]
-    sexo_dist["%"] = (sexo_dist["Entrevistas"] / total * 100).round(1)
-
-    idade_dist = df["idade"].value_counts().reset_index()
-    idade_dist.columns = ["Faixa Etária", "Entrevistas"]
-    idade_dist["%"] = (idade_dist["Entrevistas"] / total * 100).round(1)
-
-    localidades_top = df["localidade"].value_counts().head(5).reset_index()
-    localidades_top.columns = ["Localidade", "Entrevistas"]
-    localidades_top["%"] = (localidades_top["Entrevistas"] / total * 100).round(1)
-
-    top_localidades_txt = ", ".join(
-        [
-            f"{row['Localidade']} ({row['%']}%)"
-            for _, row in localidades_top.head(4).iterrows()
-        ]
-    )
-
-    sexo_txt = ", ".join(
-        [
-            f"{row['Sexo']} {row['%']}%"
-            for _, row in sexo_dist.iterrows()
-        ]
-    )
-
-    idade_txt = ", ".join(
-        [
-            f"{row['Faixa Etária']} {row['%']}%"
-            for _, row in idade_dist.iterrows()
-        ]
-    )
-
-    gps_df = extrair_gps(df)
-    entrevistas_gps = len(gps_df)
-    gps_pct = round((entrevistas_gps / total) * 100, 1) if total else 0
-
-    if entrevistas_gps > 0:
-        mapa_txt = (
-            f"A base possui {entrevistas_gps} entrevistas com coordenadas GPS válidas "
-            f"({gps_pct}% da amostra), permitindo análise territorial por pontos, "
-            f"mapa de calor e cruzamento com respostas da pesquisa."
-        )
-    else:
-        mapa_txt = (
-            "A base não possui coordenadas GPS válidas suficientes para análise territorial "
-            "por mapa. Recomenda-se verificar a captura de localização no ODK."
-        )
-
-    tabela_localidades = dash_table.DataTable(
-        data=localidades_top.to_dict("records"),
-        columns=[{"name": c, "id": c} for c in localidades_top.columns],
-        style_table={"overflowX": "auto"},
-        style_header={
-            "backgroundColor": "#020617",
-            "color": "white",
-            "fontWeight": "bold",
-            "border": "1px solid #1f2937"
-        },
-        style_cell={
-            "backgroundColor": "#111827",
-            "color": "#e5e7eb",
-            "border": "1px solid #1f2937",
-            "padding": "9px",
-            "textAlign": "left"
-        },
-        page_size=5
-    )
-
-    tabela_sexo = dash_table.DataTable(
-        data=sexo_dist.to_dict("records"),
-        columns=[{"name": c, "id": c} for c in sexo_dist.columns],
-        style_table={"overflowX": "auto"},
-        style_header={
-            "backgroundColor": "#020617",
-            "color": "white",
-            "fontWeight": "bold",
-            "border": "1px solid #1f2937"
-        },
-        style_cell={
-            "backgroundColor": "#111827",
-            "color": "#e5e7eb",
-            "border": "1px solid #1f2937",
-            "padding": "9px",
-            "textAlign": "left"
-        },
-        page_size=10
-    )
-
-    tabela_idade = dash_table.DataTable(
-        data=idade_dist.to_dict("records"),
-        columns=[{"name": c, "id": c} for c in idade_dist.columns],
-        style_table={"overflowX": "auto"},
-        style_header={
-            "backgroundColor": "#020617",
-            "color": "white",
-            "fontWeight": "bold",
-            "border": "1px solid #1f2937"
-        },
-        style_cell={
-            "backgroundColor": "#111827",
-            "color": "#e5e7eb",
-            "border": "1px solid #1f2937",
-            "padding": "9px",
-            "textAlign": "left"
-        },
-        page_size=10
-    )
-
-    # =========================
-    # INTELIGÊNCIA DAS PERGUNTAS
-    # =========================
-    dados_json = df["dados"].apply(normalizar_json)
-    json_df = pd.json_normalize(dados_json)
-
-    perguntas_df = pd.read_sql(
-        text("""
-            SELECT UPPER(name) AS name, label
-            FROM perguntas_pesquisa
-            WHERE pesquisa_id = :pesquisa_id
-            AND exibir_dashboard = true
-            ORDER BY id
-            
-        """),
-        engine,
-        params={"pesquisa_id": pesquisa_id}
-    )
-
-    blocos_perguntas = []
-
-    for _, pergunta in perguntas_df.iterrows():
-
-        nome_coluna = pergunta["name"]
-        label = pergunta["label"]
-        tipo_pergunta = classificar_pergunta(label)
-        if tipo_pergunta == "PERFIL":
-            continue
-        
-        coluna_real = None
-
-        for c in json_df.columns:
-            if c.upper() == nome_coluna:
-                coluna_real = c
-                break
-
-        if coluna_real is None:
-            continue
-
-        serie_total = json_df[coluna_real].dropna().astype(str).str.strip()
-        serie_total = serie_total[serie_total != ""]
-
-        if serie_total.empty:
-            continue
-
-        total_resp = len(serie_total)
-
-        serie_valida = serie_total[
-            ~serie_total.apply(eh_sem_direcao)
-        ]
-
-        sem_direcao = total_resp - len(serie_valida)
-
-        pct_sem_direcao = round((sem_direcao / total_resp) * 100, 1) if total_resp else 0
-        pct_definicao = round((len(serie_valida) / total_resp) * 100, 1) if total_resp else 0
-
-        if serie_valida.empty:
-            continue
-
-        contagem = serie_valida.value_counts().head(5).reset_index()
-        contagem.columns = ["Resposta", "Entrevistas"]
-        contagem["%"] = (contagem["Entrevistas"] / total_resp * 100).round(1)
-
-        top1 = contagem.iloc[0]["Resposta"]
-        top1_pct = contagem.iloc[0]["%"]
-
-        perfis_respostas = []
-
-        for _, r in contagem.head(3).iterrows():
-            resp = r["Resposta"]
-
-            fortes, fracos = grupos_fortes_fracos(
-                df,
-                nome_coluna,
-                resp
-            )
-
-            if destaques:
-                perfis_respostas.append(
-                    html.Li(
-                        f"{resp}: grupos e territórios acima da média — "
-                        + "; ".join(destaques)
-                    )
-                )
-                
-        perfil_top = perfil_resposta(df, nome_coluna, top1)
-
-        if perfil_top:
-            texto_perfil = (
-                f"Perfil predominante da resposta '{top1}': "
-                f"{perfil_top['sexo']} ({perfil_top['sexo_pct']}%), "
-                f"faixa etária {perfil_top['idade']} ({perfil_top['idade_pct']}%), "
-                f"escolaridade {perfil_top['escolaridade']} ({perfil_top['escolaridade_pct']}%), "
-                f"renda {perfil_top['renda']} ({perfil_top['renda_pct']}%), "
-                f"religião {perfil_top['religiao']} ({perfil_top['religiao_pct']}%), "
-                f"zona {perfil_top['zona']} ({perfil_top['zona_pct']}%) "
-                f"e maior presença em {perfil_top['localidade']} "
-                f"({perfil_top['localidade_pct']}%)."
-            )
-        else:
-            texto_perfil = ""
-
-        if tipo_pergunta == "ESTRATEGICA":
-
-            if len(contagem) >= 2:
-
-                segundo_resp = contagem.iloc[1]["Resposta"]
-                segundo_pct = contagem.iloc[1]["%"]
-
-                vantagem = round(top1_pct - segundo_pct, 1)
-
-                if vantagem <= 3:
-                    status_disputa = "cenário tecnicamente muito competitivo"
-                elif vantagem <= 7:
-                    status_disputa = "cenário competitivo, com liderança vulnerável"
-                elif vantagem <= 15:
-                    status_disputa = "liderança moderada"
-                else:
-                    status_disputa = "liderança ampla"
-
-                leitura = (
-                    f"**Leitura estratégica:** {top1} aparece na liderança com {top1_pct}%, "
-                    f"seguido por {segundo_resp}, com {segundo_pct}%. "
-                    f"A vantagem atual é de {vantagem} pontos, indicando {status_disputa}. "
-                    f"O índice de definição é de {pct_definicao}%, enquanto {pct_sem_direcao}% "
-                    f"permanecem sem direção eleitoral/opinativa. "
-                    f"Esse percentual de indefinição representa espaço real de crescimento, "
-                    f"disputa e conversão eleitoral. "
-                    f"Quando o volume de respostas sem direção é elevado, a liderança deve ser "
-                    f"interpretada com cautela, pois ainda existe parcela relevante do eleitorado "
-                    f"sem posição consolidada."
-                )
-
-
-            else:
-                leitura = (
-                    f"<b>Leitura estratégica:</b> "
-                    f"{top1} concentra {top1_pct}% das respostas. "
-                    f"O índice de definição é de {pct_definicao}%."
-                )
-
-        elif tipo_pergunta == "ANALITICA":
-            leitura = (
-                f"<b>Leitura analítica:</b> A resposta mais citada foi {top1}, com {top1_pct}%. "
-                f"O índice de definição é de {pct_definicao}%, enquanto {pct_sem_direcao}% "
-                f"ficaram sem direção clara."
-            )
-
-        else:
-            leitura = (
-                f"A resposta mais citada foi {top1}, com {top1_pct}%. "
-                f"O índice de definição é de {pct_definicao}%."
-            )
-
-        tabela_top = dash_table.DataTable(
-            data=contagem.to_dict("records"),
-            columns=[{"name": c, "id": c} for c in contagem.columns],
-            style_table={"overflowX": "auto"},
-            style_header={
-                "backgroundColor": "#020617",
-                "color": "white",
-                "fontWeight": "bold",
-                "border": "1px solid #1f2937"
-            },
-            style_cell={
-                "backgroundColor": "#111827",
-                "color": "#e5e7eb",
-                "border": "1px solid #1f2937",
-                "padding": "8px",
-                "textAlign": "left"
-            },
-            page_size=5
-        )
-
-        blocos_perguntas.append(
-            html.Div([
-                html.H4(
-                    f"[{tipo_pergunta}] {label}",
-                    style={
-                        "marginTop": "0",
-                        "color": "white"
-                    }
-                ),
-
-                html.Div([
-                    card("Definição", f"{pct_definicao}%", "Respostas válidas/direcionais", "#0f766e"),
-                    card("Sem direção", f"{pct_sem_direcao}%", "NS/NR, indecisos, branco/nulo", "#92400e"),
-                    card("Top resposta", str(top1), f"{top1_pct}% do total", "#1d4ed8"),
-                ], style={
-                    "display": "grid",
-                    "gridTemplateColumns": "repeat(3, 1fr)",
-                    "gap": "14px",
-                    "marginBottom": "16px"
-                }),
-
-                tabela_top,
-
-                dcc.Markdown(leitura, style={
-                    "fontSize": "15px",
-                    "lineHeight": "1.6",
-                    "color": "#cbd5e1",
-                    "marginTop": "14px"
-                }),
-            html.Div([
-                html.H4("Grupos e territórios acima da média", style={
-                    "color": "white",
-                    "marginTop": "16px"
-                }),
-
-                html.Ul(perfis_respostas, style={
-                    "color": "#cbd5e1",
-                    "lineHeight": "1.7"
-                })
-
-            ]) if perfis_respostas else None,                
-
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "20px",
-                "marginBottom": "18px"
-            })
-        )
-
-    resumo = (
-        f"A pesquisa possui {total} entrevistas válidas. "
-        f"As principais localidades da amostra são: {top_localidades_txt}. "
-        f"A distribuição por sexo é: {sexo_txt}. "
-        f"A distribuição por faixa etária é: {idade_txt}. "
-        f"{mapa_txt}"
-    )
-
-    return html.Div([
-
-        html.Div([
-            card("Total de entrevistas", f"{total:,}".replace(",", "."), "Base válida"),
-            card("Sexo predominante", sexo_top, f"{pct_fem}% feminino | {pct_masc}% masculino"),
-            card("Faixa etária líder", idade_top, "Maior presença na amostra"),
-            card("GPS válido", f"{gps_pct}%", f"{entrevistas_gps} entrevistas com mapa"),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "repeat(4, 1fr)",
-            "gap": "18px",
-            "marginBottom": "22px"
-        }),
-
-        html.Div([
-            html.H3("Resumo Executivo Automático", style={"marginTop": "0"}),
-            html.P(resumo, style={
-                "fontSize": "16px",
-                "lineHeight": "1.6",
-                "color": "#e5e7eb"
-            })
-        ], style={
-            "background": "#111827",
-            "borderRadius": "14px",
-            "border": "1px solid #1f2937",
-            "padding": "20px",
-            "marginBottom": "22px"
-        }),
-
-        html.Div([
-            html.Div([
-                html.H3("Top Localidades da Amostra", style={"marginTop": "0"}),
-                tabela_localidades
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "20px"
-            }),
-
-            html.Div([
-                html.H3("Distribuição por Sexo", style={"marginTop": "0"}),
-                tabela_sexo
-            ], style={
-                "background": "#111827",
-                "borderRadius": "14px",
-                "border": "1px solid #1f2937",
-                "padding": "20px"
-            }),
-        ], style={
-            "display": "grid",
-            "gridTemplateColumns": "1fr 1fr",
-            "gap": "18px",
-            "marginBottom": "22px"
-        }),
-
-        html.Div([
-            html.H3("Distribuição por Faixa Etária", style={"marginTop": "0"}),
-            tabela_idade
-        ], style={
-            "background": "#111827",
-            "borderRadius": "14px",
-            "border": "1px solid #1f2937",
-            "padding": "20px"
-        }),
-
-        html.Div([
-            html.H3(
-                "Análise Inteligente das Perguntas",
-                style={"marginTop": "0"}
-            ),
-
-            html.Div(blocos_perguntas if blocos_perguntas else [
-                html.Div(
-                    "Nenhuma pergunta válida encontrada para gerar inteligência.",
-                    style={
-                        "background": "#111827",
-                        "padding": "20px",
-                        "borderRadius": "14px",
-                        "border": "1px solid #1f2937",
-                        "color": "#cbd5e1"
-                    }
-                )
-            ])
-
-        ], style={
-            "background": "#0f172a",
-            "borderRadius": "14px",
-            "padding": "0px",
-            "marginTop": "22px"
-        })        
-
-    ])
-
 ODK_URL = "https://app.ar7pesquisas.com.br"
 ODK_USER = "augusto.estatistico@gmail.com"
 ODK_PASS = "@Mat050dois"
@@ -2102,11 +1247,9 @@ def atualizar_link_pdf(pesquisa_id):
         Input("btn-perguntas", "n_clicks"),
         Input("btn-entrevistadores", "n_clicks"),
         Input("btn-relatorios", "n_clicks"),
-        Input("btn-inteligencia", "n_clicks"),
-        
     ]
 )
-def mudar_secao(n1, n2, n3, n4, n5, n6, n7):
+def mudar_secao(n1, n2, n3, n4, n5, n6):
     ctx = dash.callback_context
 
     if not ctx.triggered:
@@ -2121,7 +1264,6 @@ def mudar_secao(n1, n2, n3, n4, n5, n6, n7):
         "btn-perguntas": "perguntas",
         "btn-entrevistadores": "entrevistadores",
         "btn-relatorios": "relatorios",
-        "btn-inteligencia": "inteligencia",
     }
 
     return mapa.get(botao, "visao-geral")
@@ -2135,7 +1277,6 @@ def mudar_secao(n1, n2, n3, n4, n5, n6, n7):
         Output("secao-perguntas", "style"),
         Output("secao-entrevistadores", "style"),
         Output("secao-relatorios", "style"),
-        Output("secao-inteligencia", "style"),
     ],
     Input("secao-ativa", "data")
 )
@@ -2167,7 +1308,6 @@ def exibir_secao(secao):
         base if secao == "perguntas" else oculto,
         style_entrevistadores if secao == "entrevistadores" else oculto,
         base if secao == "relatorios" else oculto,
-        base if secao == "inteligencia" else oculto,
     )
 
 # =========================
@@ -2340,6 +1480,13 @@ def gerar_pdf(pesquisa_id):
 
     styles = getSampleStyleSheet()
     elementos = []
+    
+    elementos.append(
+        Paragraph(
+            "PDF NOVO - TESTE IPSENSUS",
+            styles["Title"]
+        )
+    )
     elementos.append(Paragraph("<b>RELATÓRIO DE PESQUISA</b>", styles["Title"]))
     elementos.append(Spacer(1, 18))
     elementos.append(Paragraph(f"<b>Cliente:</b> {cliente['nome']}", styles["Normal"]))
@@ -2368,7 +1515,8 @@ def gerar_pdf(pesquisa_id):
     for coluna, titulo in [
         ("sexo", "Sexo"),
         ("idade", "Faixa Etária"),
-        ("localidade", "Localidade")
+        ("localidade", "Localidade"),
+        ("entrevistador", "Entrevistador")
     ]:
         elementos.append(Paragraph(f"<b>{titulo}</b>", styles["Heading2"]))
 
@@ -2414,24 +1562,9 @@ def gerar_pdf(pesquisa_id):
         elementos.append(Paragraph(f"<b>{label}</b>", styles["Heading2"]))
 
         contagem = serie.value_counts().reset_index()
-
-                
         contagem.columns = ["Resposta", "Quantidade"]
+
         base = contagem["Quantidade"].sum()
-
-        serie_valida = serie[~serie.apply(eh_sem_direcao)]
-        sem_direcao = len(serie) - len(serie_valida)
-
-        pct_definicao = round((len(serie_valida) / len(serie)) * 100, 1) if len(serie) else 0
-        pct_sem_direcao = round((sem_direcao / len(serie)) * 100, 1) if len(serie) else 0
-
-        elementos.append(
-            Paragraph(
-                f"<b>Índice de definição:</b> {pct_definicao}% | "
-                f"<b>Sem direção:</b> {pct_sem_direcao}%",
-                styles["Normal"]
-            )
-        )        
 
         for _, row in contagem.iterrows():
             pct = round(row["Quantidade"] / base * 100, 1)
@@ -2442,49 +1575,6 @@ def gerar_pdf(pesquisa_id):
                 )
             )
 
-
-
-        perfis_respostas = []
-
-        for _, r in contagem.head(3).iterrows():
-            resp = r["Resposta"]
-            perfil = perfil_resposta(df, nome_coluna, resp)
-
-            if perfil:
-                perfis_respostas.append(
-                    html.Li(
-                        f"{resp}: perfil predominante {perfil['sexo']}, "
-                        f"{perfil['idade']}, maior presença em {perfil['localidade']}."
-                    )
-                )
-
-        if not contagem.empty:
-
-            top_resp = contagem.iloc[0]["Resposta"]
-
-            top_qtd = contagem.iloc[0]["Quantidade"]
-
-            top_pct = round(
-                (top_qtd / base) * 100,
-                1
-            ) if base else 0
-
-            destaques = grupos_fortes(df, nome_coluna, top_resp)
-            destaque_txt = "; ".join(destaques) if destaques else "sem destaque relevante acima da média"
-
-
-            elementos.append(
-                Paragraph(
-                    f"<b>Leitura automática:</b> "
-                    f"A resposta mais citada foi <b>{top_resp}</b>, "
-                    f"com {top_pct}% das respostas. "
-                    f"Grupos e territórios acima da média: {destaque_txt}.",
-                    styles["Normal"]
-                )
-            )
-
-            elementos.append(Spacer(1, 8))                
-                
         elementos.append(Spacer(1, 14))
 
     elementos.append(PageBreak())
@@ -2511,35 +1601,8 @@ def gerar_pdf(pesquisa_id):
 
 
 # =========================
-# ETL ENDPOINT
-# =========================
-@server.route("/etl")
-def rodar_etl():
-    token = request.args.get("token")
-
-    if token != "123456":
-        return "Acesso negado", 403
-
-    resultado = subprocess.run(
-        [sys.executable, "etl.py"],
-        capture_output=True,
-        text=True,
-        timeout=600
-    )
-
-    return f"""
-    <h2>ETL executado</h2>
-    <h3>Saída</h3>
-    <pre>{resultado.stdout}</pre>
-    <h3>Erros</h3>
-    <pre>{resultado.stderr}</pre>
-    <h3>Código retorno</h3>
-    <pre>{resultado.returncode}</pre>
-    """
-
-# =========================
 # RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8050))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port)
