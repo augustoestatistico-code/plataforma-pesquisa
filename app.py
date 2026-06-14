@@ -2347,7 +2347,10 @@ def gerar_pdf(pesquisa_id):
         if coluna_real is None:
             continue
 
-        serie = json_df[coluna_real].dropna().astype(str).str.strip()
+        # IMPORTANTE PARA O PDF:
+        # A distribuição deve considerar TODAS as respostas, inclusive
+        # Não sabe, indeciso, branco/nulo, NS/NR, nenhum etc.
+        serie = json_df[coluna_real].dropna().apply(normalizar_resposta)
         serie = serie[serie != ""]
 
         if serie.empty:
@@ -2355,17 +2358,8 @@ def gerar_pdf(pesquisa_id):
 
         elementos.append(Paragraph(f"<b>{label}</b>", styles["Heading2"]))
 
-        serie_valida = serie[~serie.apply(eh_sem_direcao)]
-
-        if serie_valida.empty:
-            continue
-
-        contagem = serie_valida.value_counts().reset_index()
-
-                
-        contagem.columns = ["Resposta", "Quantidade"]
-        base = contagem["Quantidade"].sum()
-
+        # Mantém o índice de definição apenas como indicador técnico,
+        # mas NÃO remove essas respostas da tabela/distribuição do PDF.
         serie_valida = serie[~serie.apply(eh_sem_direcao)]
         sem_direcao = len(serie) - len(serie_valida)
 
@@ -2378,10 +2372,15 @@ def gerar_pdf(pesquisa_id):
                 f"<b>Sem direção:</b> {pct_sem_direcao}%",
                 styles["Normal"]
             )
-        )        
+        )
+
+        # DISTRIBUIÇÃO COMPLETA: inclui todas as respostas.
+        contagem = serie.value_counts().reset_index()
+        contagem.columns = ["Resposta", "Quantidade"]
+        base = contagem["Quantidade"].sum()
 
         for _, row in contagem.iterrows():
-            pct = round(row["Quantidade"] / base * 100, 1)
+            pct = round(row["Quantidade"] / base * 100, 1) if base else 0
             elementos.append(
                 Paragraph(
                     f"{row['Resposta']}: {row['Quantidade']} ({pct}%)",
@@ -2389,26 +2388,9 @@ def gerar_pdf(pesquisa_id):
                 )
             )
 
-
-
-        perfis_respostas = []
-
-        for _, r in contagem.head(3).iterrows():
-            resp = r["Resposta"]
-            perfil = perfil_resposta(df, nome_coluna, resp)
-
-            if perfil:
-                perfis_respostas.append(
-                    html.Li(
-                        f"{resp}: perfil predominante {perfil['sexo']}, "
-                        f"{perfil['idade']}, maior presença em {perfil['localidade']}."
-                    )
-                )
-
         if not contagem.empty:
 
             top_resp = contagem.iloc[0]["Resposta"]
-
             top_qtd = contagem.iloc[0]["Quantidade"]
 
             top_pct = round(
@@ -2416,22 +2398,34 @@ def gerar_pdf(pesquisa_id):
                 1
             ) if base else 0
 
-            destaques = grupos_fortes(df, nome_coluna, top_resp)
-            destaque_txt = "; ".join(destaques) if destaques else "sem destaque relevante acima da média"
+            if eh_sem_direcao(top_resp):
+                leitura_txt = (
+                    f"<b>Leitura automática:</b> A resposta mais citada no total foi "
+                    f"<b>{top_resp}</b>, com {top_pct}% das respostas. "
+                    f"Esse resultado faz parte do grupo sem direção/opinião definida."
+                )
+            else:
+                destaques = grupos_fortes(df, nome_coluna, top_resp)
+                trecho_destaque = (
+                    " Grupos e territórios com destaque: " + "; ".join(destaques) + "."
+                    if destaques else ""
+                )
 
+                leitura_txt = (
+                    f"<b>Leitura automática:</b> A resposta mais citada no total foi "
+                    f"<b>{top_resp}</b>, com {top_pct}% das respostas."
+                    f"{trecho_destaque}"
+                )
 
             elementos.append(
                 Paragraph(
-                    f"<b>Leitura automática:</b> "
-                    f"A resposta mais citada foi <b>{top_resp}</b>, "
-                    f"com {top_pct}% das respostas. "
-                    f"{'Grupos e territórios com destaque: ' + destaque_txt + '.' if destaques else ''}",
+                    leitura_txt,
                     styles["Normal"]
                 )
             )
 
-            elementos.append(Spacer(1, 8))                
-                
+            elementos.append(Spacer(1, 8))
+
         elementos.append(Spacer(1, 14))
 
     elementos.append(PageBreak())
