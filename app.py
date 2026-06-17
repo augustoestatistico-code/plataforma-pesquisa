@@ -1182,6 +1182,24 @@ app.layout = html.Div([
                         "fontWeight": "bold",
                         "marginLeft": "10px"
                     }
+                ),
+
+                html.A(
+                    "📊 Exportar tabelas % e amostra",
+                    id="link-exportar-tabelas",
+                    href="#",
+                    target="_blank",
+                    style={
+                        "display": "inline-block",
+                        "background": "#7c3aed",
+                        "color": "white",
+                        "padding": "12px 18px",
+                        "borderRadius": "10px",
+                        "textDecoration": "none",
+                        "fontWeight": "bold",
+                        "marginLeft": "10px",
+                        "marginTop": "10px"
+                    }
                 )
 
             ], style={
@@ -2032,6 +2050,18 @@ def atualizar_link_pdf(pesquisa_id):
     return f"/gerar_pdf/{pesquisa_id}"
 
 
+@app.callback(
+    Output("link-exportar-tabelas", "href"),
+    Input("pesquisa", "value")
+)
+def atualizar_link_tabelas(pesquisa_id):
+
+    if not pesquisa_id:
+        return "#"
+
+    return f"/exportar_tabelas/{pesquisa_id}"
+
+
 # =========================
 # CALLBACK MENU POR SEÇÃO
 # =========================
@@ -2231,6 +2261,267 @@ def exportar_excel(pesquisa_id):
             "Content-Disposition": f"attachment; filename=pesquisa_{pesquisa_id}.xlsx"
         }
     )
+
+# =========================
+# EXPORTAR TABELAS (% E AMOSTRA)
+# =========================
+@server.route("/exportar_tabelas/<int:pesquisa_id>")
+def exportar_tabelas(pesquisa_id):
+
+    if "cliente_id" not in session:
+        return "Não autorizado", 403
+
+    df = carregar_dados(pesquisa_id)
+
+    if df.empty:
+        return "Sem dados", 404
+
+    try:
+        pesquisa_nome = [
+            opt["label"]
+            for opt in lista_pesquisas(session.get("cliente_id"))
+            if opt["value"] == pesquisa_id
+        ][0]
+    except Exception:
+        pesquisa_nome = f"Pesquisa ID {pesquisa_id}"
+
+    cliente = get_cliente(session.get("cliente_id"))
+
+    dados_json = df["dados"].apply(normalizar_json)
+    json_df = pd.json_normalize(dados_json)
+
+    perguntas_df = pd.read_sql(
+        text("""
+            SELECT UPPER(name) AS name, label
+            FROM perguntas_pesquisa
+            WHERE pesquisa_id = :pesquisa_id
+            AND exibir_dashboard = true
+            ORDER BY id
+        """),
+        engine,
+        params={"pesquisa_id": pesquisa_id}
+    )
+
+    def deve_excluir_tabela(nome, label):
+        txt = f"{nome} {label}".upper()
+        excluir = [
+            "ENTREVISTADOR",
+            "SUBMISSION",
+            "_SYSTEM",
+            "_ID",
+            "INSTANCE",
+            "UUID",
+            "GPS",
+            "LATITUDE",
+            "LONGITUDE",
+            "ACCURACY",
+            "PESQUISA_INICIO",
+            "PESQUISA_FIM",
+            "HOJE",
+            "NOME"
+        ]
+        return any(x in txt for x in excluir)
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        resumo_rows = []
+        tabelas_rows = []
+
+        for _, pergunta in perguntas_df.iterrows():
+            nome_coluna = str(pergunta["name"]).upper()
+            label = str(pergunta["label"]).strip()
+
+            if deve_excluir_tabela(nome_coluna, label):
+                continue
+
+            coluna_real = None
+
+            for c in json_df.columns:
+                if str(c).upper() == nome_coluna:
+                    coluna_real = c
+                    break
+
+            if coluna_real is None:
+                continue
+
+            serie = json_df[coluna_real].dropna().apply(normalizar_resposta)
+            serie = serie[serie != ""]
+
+            if serie.empty:
+                continue
+
+            contagem = serie.value_counts(dropna=False).reset_index()
+            contagem.columns = ["Resposta", "Amostra"]
+            base = int(contagem["Amostra"].sum())
+
+            if base == 0:
+                continue
+
+            contagem["%"] = (contagem["Amostra"] / base).round(4)
+            contagem = contagem[["Resposta", "%", "Amostra"]]
+
+            top_resp = str(contagem.iloc[0]["Resposta"])
+            top_pct = float(contagem.iloc[0]["%"])
+
+            resumo_rows.append({
+                "Pergunta": label,
+                "Base": base,
+                "Top resposta": top_resp,
+                "% Top": top_pct
+            })
+
+            tabelas_rows.append([label, "", ""])
+            tabelas_rows.append(["Row Labels", "%", "Amostra"])
+
+            for _, row in contagem.iterrows():
+                tabelas_rows.append([
+                    row["Resposta"],
+                    float(row["%"]),
+                    int(row["Amostra"])
+                ])
+
+            tabelas_rows.append(["Total Geral", 1.0, base])
+            tabelas_rows.append(["", "", ""])
+            tabelas_rows.append(["", "", ""])
+
+        if resumo_rows:
+            pd.DataFrame(resumo_rows).to_excel(
+                writer,
+                index=False,
+                sheet_name="Resumo"
+            )
+        else:
+            pd.DataFrame([{
+                "Pergunta": "Nenhuma pergunta encontrada",
+                "Base": 0,
+                "Top resposta": "",
+                "% Top": 0
+            }]).to_excel(
+                writer,
+                index=False,
+                sheet_name="Resumo"
+            )
+
+        if tabelas_rows:
+            pd.DataFrame(tabelas_rows).to_excel(
+                writer,
+                index=False,
+                header=False,
+                sheet_name="Tabelas"
+            )
+        else:
+            pd.DataFrame([["Nenhuma tabela encontrada", "", ""]]).to_excel(
+                writer,
+                index=False,
+                header=False,
+                sheet_name="Tabelas"
+            )
+
+        wb_excel = writer.book
+
+        for ws in wb_excel.worksheets:
+            ws.freeze_panes = "A2"
+
+        ws_resumo = wb_excel["Resumo"]
+        ws_tabelas = wb_excel["Tabelas"]
+
+        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+        from openpyxl.utils import get_column_letter
+
+        azul = "1F4E78"
+        cinza = "D9EAF7"
+        borda = Side(style="thin", color="B7B7B7")
+
+        # Estilo resumo
+        for cell in ws_resumo[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor=azul)
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+
+        for row in ws_resumo.iter_rows(min_row=2):
+            for cell in row:
+                cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+        for cell in ws_resumo["D"][1:]:
+            cell.number_format = "0.0%"
+
+        ws_resumo.column_dimensions["A"].width = 70
+        ws_resumo.column_dimensions["B"].width = 12
+        ws_resumo.column_dimensions["C"].width = 28
+        ws_resumo.column_dimensions["D"].width = 12
+
+        # Estilo tabelas
+        for row in ws_tabelas.iter_rows():
+            first = row[0].value if len(row) else None
+
+            if first and first not in ["Row Labels", "Total Geral"]:
+                # Linha de título da pergunta
+                row[0].font = Font(bold=True, color="FFFFFF", size=11)
+                row[0].fill = PatternFill("solid", fgColor=azul)
+                row[0].alignment = Alignment(wrap_text=True)
+                for cell in row:
+                    cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+
+            elif first == "Row Labels":
+                for cell in row:
+                    cell.font = Font(bold=True, color="000000")
+                    cell.fill = PatternFill("solid", fgColor=cinza)
+                    cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+                    cell.alignment = Alignment(horizontal="center")
+
+            elif first == "Total Geral":
+                for cell in row:
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill("solid", fgColor="E2F0D9")
+                    cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+
+            else:
+                for cell in row:
+                    if cell.value not in [None, ""]:
+                        cell.border = Border(top=borda, left=borda, right=borda, bottom=borda)
+
+        for cell in ws_tabelas["B"]:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = "0.0%"
+
+        ws_tabelas.column_dimensions["A"].width = 65
+        ws_tabelas.column_dimensions["B"].width = 12
+        ws_tabelas.column_dimensions["C"].width = 12
+
+        # Aba de identificação
+        ws_info = wb_excel.create_sheet("Info", 0)
+        ws_info["A1"] = "Cliente"
+        ws_info["B1"] = cliente.get("nome", "")
+        ws_info["A2"] = "Pesquisa"
+        ws_info["B2"] = pesquisa_nome
+        ws_info["A3"] = "Total de entrevistas na base"
+        ws_info["B3"] = len(df)
+        ws_info["A4"] = "Observação"
+        ws_info["B4"] = "As tabelas consideram todas as respostas informadas, incluindo Não sabe, indecisos, branco/nulo, NS/NR, nenhum e demais respostas indefinidas."
+        for cell in ws_info["A"]:
+            cell.font = Font(bold=True)
+        ws_info.column_dimensions["A"].width = 28
+        ws_info.column_dimensions["B"].width = 90
+        ws_info["B4"].alignment = Alignment(wrap_text=True)
+
+    output.seek(0)
+
+    nome_arquivo = (
+        f"tabelas_percentual_amostra_{pesquisa_id}.xlsx"
+    )
+
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={nome_arquivo}"
+        }
+    )
+
+
 # =========================
 # GERAR PDF
 # =========================
@@ -2347,10 +2638,7 @@ def gerar_pdf(pesquisa_id):
         if coluna_real is None:
             continue
 
-        # IMPORTANTE PARA O PDF:
-        # A distribuição deve considerar TODAS as respostas, inclusive
-        # Não sabe, indeciso, branco/nulo, NS/NR, nenhum etc.
-        serie = json_df[coluna_real].dropna().apply(normalizar_resposta)
+        serie = json_df[coluna_real].dropna().astype(str).str.strip()
         serie = serie[serie != ""]
 
         if serie.empty:
@@ -2358,8 +2646,17 @@ def gerar_pdf(pesquisa_id):
 
         elementos.append(Paragraph(f"<b>{label}</b>", styles["Heading2"]))
 
-        # Mantém o índice de definição apenas como indicador técnico,
-        # mas NÃO remove essas respostas da tabela/distribuição do PDF.
+        serie_valida = serie[~serie.apply(eh_sem_direcao)]
+
+        if serie_valida.empty:
+            continue
+
+        contagem = serie_valida.value_counts().reset_index()
+
+                
+        contagem.columns = ["Resposta", "Quantidade"]
+        base = contagem["Quantidade"].sum()
+
         serie_valida = serie[~serie.apply(eh_sem_direcao)]
         sem_direcao = len(serie) - len(serie_valida)
 
@@ -2372,15 +2669,10 @@ def gerar_pdf(pesquisa_id):
                 f"<b>Sem direção:</b> {pct_sem_direcao}%",
                 styles["Normal"]
             )
-        )
-
-        # DISTRIBUIÇÃO COMPLETA: inclui todas as respostas.
-        contagem = serie.value_counts().reset_index()
-        contagem.columns = ["Resposta", "Quantidade"]
-        base = contagem["Quantidade"].sum()
+        )        
 
         for _, row in contagem.iterrows():
-            pct = round(row["Quantidade"] / base * 100, 1) if base else 0
+            pct = round(row["Quantidade"] / base * 100, 1)
             elementos.append(
                 Paragraph(
                     f"{row['Resposta']}: {row['Quantidade']} ({pct}%)",
@@ -2388,9 +2680,26 @@ def gerar_pdf(pesquisa_id):
                 )
             )
 
+
+
+        perfis_respostas = []
+
+        for _, r in contagem.head(3).iterrows():
+            resp = r["Resposta"]
+            perfil = perfil_resposta(df, nome_coluna, resp)
+
+            if perfil:
+                perfis_respostas.append(
+                    html.Li(
+                        f"{resp}: perfil predominante {perfil['sexo']}, "
+                        f"{perfil['idade']}, maior presença em {perfil['localidade']}."
+                    )
+                )
+
         if not contagem.empty:
 
             top_resp = contagem.iloc[0]["Resposta"]
+
             top_qtd = contagem.iloc[0]["Quantidade"]
 
             top_pct = round(
@@ -2398,34 +2707,22 @@ def gerar_pdf(pesquisa_id):
                 1
             ) if base else 0
 
-            if eh_sem_direcao(top_resp):
-                leitura_txt = (
-                    f"<b>Leitura automática:</b> A resposta mais citada no total foi "
-                    f"<b>{top_resp}</b>, com {top_pct}% das respostas. "
-                    f"Esse resultado faz parte do grupo sem direção/opinião definida."
-                )
-            else:
-                destaques = grupos_fortes(df, nome_coluna, top_resp)
-                trecho_destaque = (
-                    " Grupos e territórios com destaque: " + "; ".join(destaques) + "."
-                    if destaques else ""
-                )
+            destaques = grupos_fortes(df, nome_coluna, top_resp)
+            destaque_txt = "; ".join(destaques) if destaques else "sem destaque relevante acima da média"
 
-                leitura_txt = (
-                    f"<b>Leitura automática:</b> A resposta mais citada no total foi "
-                    f"<b>{top_resp}</b>, com {top_pct}% das respostas."
-                    f"{trecho_destaque}"
-                )
 
             elementos.append(
                 Paragraph(
-                    leitura_txt,
+                    f"<b>Leitura automática:</b> "
+                    f"A resposta mais citada foi <b>{top_resp}</b>, "
+                    f"com {top_pct}% das respostas. "
+                    f"{'Grupos e territórios com destaque: ' + destaque_txt + '.' if destaques else ''}",
                     styles["Normal"]
                 )
             )
 
-            elementos.append(Spacer(1, 8))
-
+            elementos.append(Spacer(1, 8))                
+                
         elementos.append(Spacer(1, 14))
 
     elementos.append(PageBreak())
@@ -2454,29 +2751,28 @@ def gerar_pdf(pesquisa_id):
 # =========================
 # ETL ENDPOINT
 # =========================
-@server.route("/etl")
+@server.route("/etl", methods=["GET", "HEAD"])
 def rodar_etl():
+
     token = request.args.get("token")
 
     if token != "123456":
-        return "Acesso negado", 403
+        return "Token inválido", 403
 
-    resultado = subprocess.run(
-        [sys.executable, "etl.py"],
-        capture_output=True,
-        text=True,
-        timeout=600
-    )
+    if request.method == "HEAD":
+        return "", 200
 
-    return f"""
-    <h2>ETL executado</h2>
-    <h3>Saída</h3>
-    <pre>{resultado.stdout}</pre>
-    <h3>Erros</h3>
-    <pre>{resultado.stderr}</pre>
-    <h3>Código retorno</h3>
-    <pre>{resultado.returncode}</pre>
-    """
+    import threading
+
+    def executar():
+        subprocess.run(
+            [sys.executable, "etl.py"],
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+
+    threading.Thread(target=executar, daemon=True).start()
+
+    return "ETL iniciado em segundo plano", 200
 
 # =========================
 # RUN
