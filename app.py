@@ -22,10 +22,18 @@ import io
 # =========================
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+
+SECRET_KEY = os.getenv("SECRET_KEY", "123456")
 
 server = Flask(__name__)
 server.secret_key = SECRET_KEY
+
+app = dash.Dash(
+    __name__,
+    server=server,
+    url_base_pathname="/dashboard/",
+    suppress_callback_exceptions=True
+)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -88,16 +96,6 @@ def proteger_dashboard():
     if request.path.startswith("/dashboard") and "cliente_id" not in session:
         return redirect("/")
 
-
-# =========================
-# DASH
-# =========================
-app = dash.Dash(
-    __name__,
-    server=server,
-    url_base_pathname="/dashboard/",
-    suppress_callback_exceptions=True
-)
 
 # =========================
 # FUNÇÕES
@@ -903,7 +901,12 @@ def carregar_audios(pesquisa_id):
 # =========================
 app.layout = html.Div([
     dcc.Location(id="url"),
-    dcc.Store(id="secao-ativa", data="visao-geral"),
+
+    dcc.Interval(
+        id="interval-atualizacao",
+        interval=15 * 60 * 1000,  # 15 minutos
+        n_intervals=0
+    ),    
 
     # SIDEBAR
     html.Div([
@@ -1323,10 +1326,10 @@ def inicializar_dashboard(pathname):
         Input("filtro-entrevistador", "value"),
         Input("pergunta-mapa", "value"),
         Input("tipo-mapa", "value"),
+        Input("interval-atualizacao", "n_intervals"),
     ]
 )
-def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pergunta_mapa, tipo_mapa):
-    
+def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pergunta_mapa, tipo_mapa, n_intervals):   
     if not pesquisa_id:
         fig_vazio = tema_fig(px.bar(title="Sem pesquisa selecionada"))
         return [], fig_vazio, fig_vazio, fig_vazio, "", "", "", "", [], [], [], ""
@@ -1625,9 +1628,12 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
 # =========================
 @app.callback(
     Output("inteligencia-conteudo", "children"),
-    Input("pesquisa", "value")
+    [
+        Input("pesquisa", "value"),
+        Input("interval-atualizacao", "n_intervals"),
+    ]
 )
-def gerar_inteligencia(pesquisa_id):
+def gerar_inteligencia(pesquisa_id, n_intervals):
 
     try:
         if not pesquisa_id:
@@ -2752,25 +2758,17 @@ def gerar_pdf(pesquisa_id):
 # ETL ENDPOINT
 # =========================
 @server.route("/etl", methods=["GET", "HEAD"])
-def rodar_etl():
+def etl():
 
     token = request.args.get("token")
 
-    if token != "123456":
+    if token != os.getenv("ETL_TOKEN", "123456"):
         return "Token inválido", 403
 
     if request.method == "HEAD":
         return "", 200
 
-    import threading
-
-    def executar():
-        subprocess.run(
-            [sys.executable, "etl.py"],
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
-
-    threading.Thread(target=executar, daemon=True).start()
+    threading.Thread(target=executar_etl).start()
 
     return "ETL iniciado em segundo plano", 200
 

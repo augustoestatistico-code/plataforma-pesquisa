@@ -343,3 +343,8 @@ for _,pesquisa in pesquisas.iterrows():
         )
 
 print("\nETL FINALIZADO E ATUALIZADO")
+
+cursor.execute("""
+INSERT INTO log_etl (observacao)
+VALUES ('ETL executado com sucesso')
+""")
