@@ -2765,10 +2765,14 @@ def etl():
     if token != os.getenv("ETL_TOKEN", "123456"):
         return "Token inválido", 403
 
+    # Executa tanto para GET quanto para HEAD
+    subprocess.Popen(
+        [sys.executable, "etl.py"],
+        cwd=os.path.dirname(os.path.abspath(__file__))
+    )
+
     if request.method == "HEAD":
         return "", 200
-
-    threading.Thread(target=executar_etl).start()
 
     return "ETL iniciado em segundo plano", 200
 
