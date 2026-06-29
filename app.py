@@ -1565,17 +1565,20 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
             margin=dict(l=0, r=0, t=50, b=0)
         )
 
-    perguntas = gerar_graficos_perguntas(df, pesquisa_id, pergunta_mapa)
+    perguntas = []
     audios = carregar_audios(pesquisa_id)
 
     if not perguntas:
-        perguntas = [
-            html.Div("Nenhuma pergunta encontrada no campo dados JSONB.", style={
+        perguntas = html.Div(
+            "Clique na aba Perguntas para carregar os gráficos.",
+            style={
                 "background": "#111827",
                 "padding": "20px",
-                "borderRadius": "18px"
-            })
-        ]
+                "borderRadius": "18px",
+                "color": "#cbd5e1"
+            }
+        )
+        
     perguntas_mapa_df = pd.read_sql(
         text("""
             SELECT UPPER(name) AS name, label
