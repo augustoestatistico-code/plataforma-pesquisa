@@ -220,8 +220,7 @@ for _,pesquisa in pesquisas.iterrows():
                     )
 
                     ON CONFLICT
-                    (submission_id)
-
+                    (pesquisa_id, submission_id)
                     DO NOTHING
 
                     """),
@@ -296,7 +295,7 @@ for _,pesquisa in pesquisas.iterrows():
                             )
 
                             ON CONFLICT
-                            (submission_id, nome_arquivo)
+                            (pesquisa_id, submission_id, nome_arquivo)
 
                             DO NOTHING
 

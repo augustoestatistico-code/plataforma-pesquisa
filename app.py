@@ -1789,7 +1789,7 @@ def gerar_inteligencia(pesquisa_id, n_intervals):
                 perfis_respostas = []
                 for _, r in contagem.head(3).iterrows():
                     resp = r["Resposta"]
-                    fortes, fracos = grupos_fortes_fracos(df, nome_coluna, resp)
+                    fortes, fracos = [], []
 
                     if fortes or fracos:
                         texto = f"{resp}: "
