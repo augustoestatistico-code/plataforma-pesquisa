@@ -905,7 +905,7 @@ def carregar_audios(pesquisa_id):
 # =========================
 app.layout = html.Div([
     dcc.Location(id="url"),
-
+    dcc.Store(id="secao-ativa", data="visao-geral"),
     dcc.Interval(
         id="interval-atualizacao",
         interval=15 * 60 * 1000,  # 15 minutos
