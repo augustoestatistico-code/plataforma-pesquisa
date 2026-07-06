@@ -855,7 +855,6 @@ def carregar_audios(pesquisa_id):
             FROM audios_entrevistas
             WHERE pesquisa_id = %(pesquisa_id)s
             ORDER BY id DESC
-            LIMIT 100
         """
 
         df = pd.read_sql(sql, engine, params={"pesquisa_id": pesquisa_id})
@@ -872,12 +871,17 @@ def carregar_audios(pesquisa_id):
                 html.Td(row["entrevistador"]),
                 html.Td(row["localidade"]),
                 html.Td(str(row["data_entrevista"])),
-                html.Td( html.Audio(
-                            src=audio_src,
-                            controls=True,
-                            style={"width": "300px"}
+                html.Td( html.A(
+                            "▶ Ouvir áudio",
+                            href=audio_src,
+                            target="_blank",
+                            style={
+                                "color": "#38bdf8",
+                                "fontWeight": "bold",
+                                "textDecoration": "none"
+                            }
                         ))
-            ]))
+                ]))
 
         return html.Table([
             html.Thead(html.Tr([
