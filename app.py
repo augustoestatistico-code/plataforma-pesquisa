@@ -2321,24 +2321,69 @@ def exportar_tabelas(pesquisa_id):
         params={"pesquisa_id": pesquisa_id}
     )
 
+    # labels cadastradas
+    labels_map = {}
+    if not perguntas_df.empty:
+        labels_map = dict(zip(
+            perguntas_df["name"].astype(str).str.upper(),
+            perguntas_df["label"].astype(str)
+        ))
+
+    # cria lista completa: primeiro perguntas_pesquisa, depois tudo que existe no JSON
+    ordem_perguntas = []
+
+    for _, p in perguntas_df.iterrows():
+        ordem_perguntas.append({
+            "name": str(p["name"]).upper(),
+            "label": str(p["label"]).strip()
+        })
+
+    nomes_ja = set([p["name"] for p in ordem_perguntas])
+
+    for c in json_df.columns:
+        nome_upper = str(c).upper()
+        if nome_upper not in nomes_ja:
+            ordem_perguntas.append({
+                "name": nome_upper,
+                "label": str(c)
+            })
+            nomes_ja.add(nome_upper)
+
     def deve_excluir_tabela(nome, label):
         txt = f"{nome} {label}".upper()
+
         excluir = [
-            "ENTREVISTADOR",
-            "SUBMISSION",
             "_SYSTEM",
-            "_ID",
+            "META.",
             "INSTANCE",
             "UUID",
+            "__ID",
+            "_ID",
+            "SUBMISSION",
             "GPS",
             "LATITUDE",
             "LONGITUDE",
             "ACCURACY",
+            "ACC_FINAL",
+            "ALT_FINAL",
+            "LAT_FINAL",
+            "LON_FINAL",
+            "ACC_INICIO",
+            "ALT_INICIO",
+            "LAT_INICIO",
+            "LON_INICIO",
+            "DATA_ENTREVISTA",
             "PESQUISA_INICIO",
             "PESQUISA_FIM",
-            "HOJE",
-            "NOME"
+            "START",
+            "END",
+            "DEVICEID",
+            "ATTACHMENTS",
+            "STATUS",
+            "REVIEWSTATE",
+            "FORMVERSION"
         ]
+
         return any(x in txt for x in excluir)
 
     output = io.BytesIO()
@@ -2347,7 +2392,7 @@ def exportar_tabelas(pesquisa_id):
         resumo_rows = []
         tabelas_rows = []
 
-        for _, pergunta in perguntas_df.iterrows():
+        for pergunta in ordem_perguntas:
             nome_coluna = str(pergunta["name"]).upper()
             label = str(pergunta["label"]).strip()
 
@@ -2642,20 +2687,28 @@ def gerar_pdf(pesquisa_id):
 
     elementos.append(Paragraph("<b>3. Resultados das Perguntas</b>", styles["Heading1"]))
 
-    for _, pergunta in perguntas_df.iterrows():
+    labels_map = dict(zip(
+        perguntas_df["name"].astype(str).str.upper(),
+        perguntas_df["label"].astype(str)
+    ))
 
+    ordem_perguntas = []
+
+    for c in json_df.columns:
+        nome_coluna = str(c).upper()
+        label = labels_map.get(nome_coluna, str(c))
+
+        ordem_perguntas.append({
+            "name": nome_coluna,
+            "label": label,
+            "coluna_real": c
+        })
+
+    for pergunta in ordem_perguntas:
         nome_coluna = pergunta["name"]
         label = pergunta["label"]
+        coluna_real = pergunta["coluna_real"]
 
-        coluna_real = None
-
-        for c in json_df.columns:
-            if c.upper() == nome_coluna:
-                coluna_real = c
-                break
-
-        if coluna_real is None:
-            continue
 
         serie = json_df[coluna_real].dropna().astype(str).str.strip()
         serie = serie[serie != ""]
