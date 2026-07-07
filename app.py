@@ -1569,12 +1569,19 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
             margin=dict(l=0, r=0, t=50, b=0)
         )
 
-    perguntas = []
+    # =========================
+    # CARREGAR PERGUNTAS
+    # =========================
+    perguntas = gerar_graficos_perguntas(
+        df,
+        pesquisa_id
+    )
+
     audios = carregar_audios(pesquisa_id)
 
     if not perguntas:
         perguntas = html.Div(
-            "Clique na aba Perguntas para carregar os gráficos.",
+            "Nenhuma pergunta disponível para exibição.",
             style={
                 "background": "#111827",
                 "padding": "20px",
@@ -1582,7 +1589,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
                 "color": "#cbd5e1"
             }
         )
-        
+            
     perguntas_mapa_df = pd.read_sql(
         text("""
             SELECT UPPER(name) AS name, label
@@ -2308,7 +2315,6 @@ def exportar_tabelas(pesquisa_id):
             SELECT UPPER(name) AS name, label
             FROM perguntas_pesquisa
             WHERE pesquisa_id = :pesquisa_id
-            AND exibir_dashboard = true
             ORDER BY id
         """),
         engine,
