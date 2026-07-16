@@ -24,30 +24,37 @@ if not DATABASE_URL:
 if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
     raise ValueError(f"DATABASE_URL inválida: {DATABASE_URL}")
 
-engine = create_engine(DATABASE_URL)
-
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={
+        "connect_timeout": 30,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
+)
 
 # ======================
 # BUSCAR TODAS PÁGINAS ODK
 # ======================
-
 def buscar_todas_submissoes(url):
 
-    todos=[]
+    todos = []
 
     while url:
 
-        print("BUSCANDO:",url)
+        print("BUSCANDO:", url)
 
-        r=requests.get(
+        r = requests.get(
             url,
-            auth=HTTPBasicAuth(
-                ODK_USER,
-                ODK_PASS
-            )
+            auth=HTTPBasicAuth(ODK_USER, ODK_PASS),
+            timeout=(30, 180)
         )
 
-        if r.status_code!=200:
+        if r.status_code != 200:
 
             print(
                 "ERRO API:",
@@ -60,9 +67,9 @@ def buscar_todas_submissoes(url):
 
             return []
 
-        js=r.json()
+        js = r.json()
 
-        pagina=js.get(
+        pagina = js.get(
             "value",
             []
         )
@@ -71,12 +78,11 @@ def buscar_todas_submissoes(url):
             pagina
         )
 
-        url=js.get(
+        url = js.get(
             "@odata.nextLink"
         )
 
     return todos
-
 
 # ======================
 # BUSCAR PESQUISAS

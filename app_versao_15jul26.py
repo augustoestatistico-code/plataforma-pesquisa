@@ -56,7 +56,6 @@ def login():
             user = conn.execute(query, {"email": email, "senha": senha}).fetchone()
 
         if user:
-            
             session["user_id"] = user[0]
             session["cliente_id"] = user[1]
             return redirect("/dashboard/")
@@ -96,61 +95,7 @@ def logout():
 def proteger_dashboard():
     if request.path.startswith("/dashboard") and "cliente_id" not in session:
         return redirect("/")
-@server.route("/diagnostico")
-def diagnostico():
 
-    cliente_id = session.get("cliente_id")
-    user_id = session.get("user_id")
-
-    resultado = {
-        "session_user_id": user_id,
-        "session_cliente_id": cliente_id,
-        "database_url_inicio": DATABASE_URL[:45] if DATABASE_URL else "VAZIA",
-        "cliente": None,
-        "pesquisas": []
-    }
-
-    if cliente_id:
-        with engine.connect() as conn:
-
-            cliente = conn.execute(
-                text("""
-                    SELECT id, nome
-                    FROM clientes
-                    WHERE id = :cliente_id
-                """),
-                {"cliente_id": cliente_id}
-            ).fetchone()
-
-            pesquisas = conn.execute(
-                text("""
-                    SELECT id, nome, cliente_id, origem
-                    FROM pesquisas
-                    WHERE cliente_id = :cliente_id
-                    ORDER BY id DESC
-                """),
-                {"cliente_id": cliente_id}
-            ).fetchall()
-
-        resultado["cliente"] = (
-            {"id": cliente[0], "nome": cliente[1]}
-            if cliente else None
-        )
-
-        resultado["pesquisas"] = [
-            {
-                "id": p[0],
-                "nome": p[1],
-                "cliente_id": p[2],
-                "origem": p[3]
-            }
-            for p in pesquisas
-        ]
-
-    return Response(
-        json.dumps(resultado, ensure_ascii=False, indent=2),
-        mimetype="application/json"
-    )
 
 # =========================
 # FUNÇÕES
@@ -176,28 +121,16 @@ def get_cliente(cliente_id):
 
 
 def lista_pesquisas(cliente_id):
-
-    print("=" * 80)
-    print("LISTA_PESQUISAS")
-    print("CLIENTE RECEBIDO:", cliente_id)
-
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text("""
-                SELECT id, nome
-                FROM pesquisas
-                WHERE cliente_id = :cliente_id
-                ORDER BY id DESC
-            """),
-            {"cliente_id": cliente_id}
-        ).fetchall()
-
-    print("ROWS:", rows)
-
-    return [
-        {"label": r[1], "value": r[0]}
-        for r in rows
-    ]
+    df = pd.read_sql(
+        text("""
+            SELECT id, nome
+            FROM pesquisas
+            WHERE cliente_id = :cliente_id
+            ORDER BY id DESC
+        """),
+        engine,
+        params={"cliente_id": cliente_id}
+    )
 
     return [{"label": row["nome"], "value": row["id"]} for _, row in df.iterrows()]
 
@@ -755,61 +688,30 @@ def cor_resposta_mapa(valor):
 
 
 def pergunta_deve_ignorar(coluna):
-
-    if coluna is None:
-        return True
-
-    c = str(coluna).strip().upper()
-
-    CAMPOS_OCULTOS = {
-
-        "KEY",
-        "DT_PESQ",
-        "DATA_ENTREVISTA",
-
-        "LAT_INICIO",
-        "LON_INICIO",
-        "ACC_INICIO",
-        "ALT_INICIO",
-
-        "LAT_FINAL",
-        "LON_FINAL",
-        "ACC_FINAL",
-        "ALT_FINAL",
-
-        "LATITUDE_MELHOR",
-        "LONGITUDE_MELHOR",
-        "ACCURACY_MELHOR",
-
-        "GPS",
-        "GPS_FINAL",
-        "GPS_INICIO",
-
-        "NOME",
-        "LOC1",
-
-        "PESQUISA_INICIO",
-        "PESQUISA_FIM",
+    colunas_ignorar_fixas = {
+        "meta.instanceID",
+        "instanceID",
+        "__system",
+        "_id",
+        "_uuid",
+        "_submission_time",
+        "nome",
+        "loc1",
+        "pesquisa_inicio",
+        "pesquisa_fim",
+        "hoje",
         "HOJE",
-
-        "INSTANCEID",
-        "META.INSTANCEID",
-        "_ID",
-        "_UUID",
-        "_SYSTEM",
-        "_SUBMISSION_TIME"
+        "PESQUISA_INICIO",
+        "PESQUISA_FIM"
     }
 
-    if c in CAMPOS_OCULTOS:
+    if coluna in colunas_ignorar_fixas:
         return True
 
-    if c.startswith("_SYSTEM"):
+    if coluna.startswith("_system."):
         return True
 
-    if c.startswith("_"):
-        return True
-
-    if c.startswith("META."):
+    if coluna.startswith("_"):
         return True
 
     return False
@@ -865,8 +767,6 @@ def gerar_graficos_perguntas(df, pesquisa_id, pergunta_selecionada=None):
         coluna_upper = coluna.upper()
 
         if coluna_upper not in lista_exibir:
-            continue
-        if pergunta_deve_ignorar(coluna_upper):
             continue
 
         serie = json_df[coluna].dropna().astype(str).str.strip()
@@ -1358,24 +1258,6 @@ app.layout = html.Div([
     Input("url", "pathname")
 )
 def inicializar_dashboard(pathname):
-
-    print("="*80)
-    print("ENTROU NO CALLBACK")
-    print("PATH:", pathname)
-    print("SESSION:", dict(session))
-
-    cliente_id = session.get("cliente_id")
-
-    print("CLIENTE:", cliente_id)
-
-    if not cliente_id:
-        print("SEM CLIENTE")
-        return [], None, ""
-
-    options = lista_pesquisas(cliente_id)
-
-    print("OPTIONS:", options)
-    
     cliente_id = session.get("cliente_id")
 
     if not cliente_id:
@@ -1720,17 +1602,10 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
         params={"pesquisa_id": pesquisa_id}
     )
 
-    opcoes_pergunta_mapa = []
-
-    for _, row in perguntas_mapa_df.iterrows():
-
-        if pergunta_deve_ignorar(row["name"]):
-            continue
-
-        opcoes_pergunta_mapa.append({
-            "label": row["label"],
-            "value": row["name"]
-        })
+    opcoes_pergunta_mapa = [
+        {"label": row["label"], "value": row["name"]}
+        for _, row in perguntas_mapa_df.iterrows()
+    ]
     
     pesquisa_nome = ""
 
@@ -1887,8 +1762,6 @@ def gerar_inteligencia(pesquisa_id, n_intervals):
         for _, pergunta in perguntas_df.iterrows():
             try:
                 nome_coluna = str(pergunta["name"]).upper()
-                if pergunta_deve_ignorar(nome_coluna):
-                    continue
                 label = pergunta["label"]
                 tipo_pergunta = classificar_pergunta(label)
 
@@ -2481,8 +2354,6 @@ def exportar_tabelas(pesquisa_id):
 
         excluir = [
             "_SYSTEM",
-            "DT_PESQ",
-            "KEY",
             "META.",
             "INSTANCE",
             "UUID",
