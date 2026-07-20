@@ -17,6 +17,28 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import io
 
+@server.route("/etl")
+def rodar_etl():
+
+    token = request.args.get("token")
+
+    if token != "123456":
+        return "Token inválido", 403
+
+    try:
+        print("="*80)
+        print("RODANDO ETL AUTOMÁTICO...")
+        
+        subprocess.run(["python", "etl.py"], check=True)
+
+        print("ETL FINALIZADO")
+
+        return "ETL executado com sucesso"
+
+    except Exception as e:
+        print("ERRO NO ETL:", str(e))
+        return f"Erro: {str(e)}", 500
+    
 # =========================
 # CONFIG
 # =========================
