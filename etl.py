@@ -133,6 +133,18 @@ for _, pesquisa in pesquisas.iterrows():
         print("Projeto convertido   :", projeto_odk)
         print("Form ID              :", form_id)
 
+        print("PROCESSANDO:", pesquisa["nome"])
+
+        # 🔴 VALIDAÇÃO (COLOQUE ISSO AQUI)
+        if pd.isna(pesquisa["projeto_odk"]) or pd.isna(pesquisa["form_id"]):
+            print("IGNORANDO PESQUISA COM DADOS INVÁLIDOS:", pesquisa["nome"])
+            continue
+
+        # 🔵 CONVERSÃO SEGURA
+        projeto_odk = int(str(pesquisa["projeto_odk"]).replace(".0", "").strip())
+        form_id = str(pesquisa["form_id"]).strip()
+
+        # 🟢 AGORA MONTA A URL
         url = (
             f"{ODK_URL}/v1/projects/{projeto_odk}"
             f"/forms/{form_id}.svc/Submissions"
