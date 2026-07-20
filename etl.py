@@ -88,19 +88,20 @@ def buscar_todas_submissoes(url):
 # BUSCAR PESQUISAS
 # ======================
 
-pesquisas=pd.read_sql("""
-
-SELECT
-    id,
-    nome,
-    projeto_odk,
-    form_id
-
-FROM pesquisas
-
-ORDER BY id
-
-""",engine)
+pesquisas = pd.read_sql("""
+    SELECT
+        id,
+        nome,
+        projeto_odk,
+        form_id,
+        origem
+    FROM pesquisas
+    WHERE UPPER(COALESCE(origem, 'ODK')) = 'ODK'
+      AND projeto_odk IS NOT NULL
+      AND form_id IS NOT NULL
+      AND TRIM(CAST(form_id AS TEXT)) <> ''
+    ORDER BY id
+""", engine)
 
 if PESQUISA_ID:
     pesquisas = pesquisas[
@@ -118,40 +119,36 @@ print(
 # LOOP
 # ======================
 
-for _,pesquisa in pesquisas.iterrows():
+for _, pesquisa in pesquisas.iterrows():
 
     try:
 
-        print(
-            "\n================="
+        print("\n=================")
+        print("PROCESSANDO:", pesquisa["nome"])
+
+        projeto_odk = int(str(pesquisa["projeto_odk"]).split(".")[0])
+        form_id = str(pesquisa["form_id"]).strip()
+
+        print("Projeto ODK original :", pesquisa["projeto_odk"])
+        print("Projeto convertido   :", projeto_odk)
+        print("Form ID              :", form_id)
+
+        url = (
+            f"{ODK_URL}/v1/projects/{projeto_odk}"
+            f"/forms/{form_id}.svc/Submissions"
         )
 
-        print(
-            "PROCESSANDO:",
-            pesquisa["nome"]
-        )
+        print("BUSCANDO:", url)
 
-        url=(
+        data = buscar_todas_submissoes(url)
 
-            f"{ODK_URL}/v1/projects/"
-            f"{pesquisa['projeto_odk']}"
-            f"/forms/"
-            f"{pesquisa['form_id']}"
-            ".svc/Submissions"
+        
 
-        )
+        data = buscar_todas_submissoes(url)
 
-        data=buscar_todas_submissoes(
-            url
-        )
+        print("TOTAL ODK:", len(data))
 
-        print(
-            "TOTAL ODK:",
-            len(data)
-        )
-
-        if len(data)==0:
-
+        if len(data) == 0:
             continue
 
         df=pd.DataFrame(data)
