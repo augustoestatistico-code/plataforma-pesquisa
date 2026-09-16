@@ -88,6 +88,7 @@ def buscar_todas_submissoes(url):
 # BUSCAR PESQUISAS
 # ======================
 
+
 pesquisas = pd.read_sql("""
     SELECT
         id,
@@ -100,9 +101,21 @@ pesquisas = pd.read_sql("""
       AND projeto_odk IS NOT NULL
       AND form_id IS NOT NULL
       AND TRIM(CAST(form_id AS TEXT)) <> ''
+      AND COALESCE(atualizar_auto, false) = true
     ORDER BY id
 """, engine)
 
+if PESQUISA_ID:
+    pesquisas = pesquisas[
+        pesquisas["id"] == int(PESQUISA_ID)
+    ]
+
+print("\nPESQUISAS ENCONTRADAS:")
+print(
+    pesquisas[
+        ["id", "nome"]
+    ]
+)
 if PESQUISA_ID:
     pesquisas = pesquisas[
         pesquisas["id"] == int(PESQUISA_ID)
