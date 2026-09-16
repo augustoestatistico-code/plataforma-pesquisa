@@ -126,25 +126,37 @@ for _, pesquisa in pesquisas.iterrows():
         print("\n=================")
         print("PROCESSANDO:", pesquisa["nome"])
 
-        projeto_odk = int(str(pesquisa["projeto_odk"]).split(".")[0])
+        # =========================
+        # VALIDAR DADOS ODK
+        # =========================
+        if pd.isna(pesquisa["projeto_odk"]) or pd.isna(pesquisa["form_id"]):
+            print(
+                "IGNORANDO PESQUISA COM DADOS ODK INVÁLIDOS:",
+                pesquisa["nome"]
+            )
+            continue
+
+        # =========================
+        # CONVERTER PROJETO ODK
+        # Ex.: 4.0 -> 4
+        # =========================
+        projeto_odk = int(float(pesquisa["projeto_odk"]))
         form_id = str(pesquisa["form_id"]).strip()
+
+        if not form_id or form_id.lower() == "nan":
+            print(
+                "IGNORANDO PESQUISA SEM FORM_ID:",
+                pesquisa["nome"]
+            )
+            continue
 
         print("Projeto ODK original :", pesquisa["projeto_odk"])
         print("Projeto convertido   :", projeto_odk)
         print("Form ID              :", form_id)
 
-        print("PROCESSANDO:", pesquisa["nome"])
-
-        # 🔴 VALIDAÇÃO (COLOQUE ISSO AQUI)
-        if pd.isna(pesquisa["projeto_odk"]) or pd.isna(pesquisa["form_id"]):
-            print("IGNORANDO PESQUISA COM DADOS INVÁLIDOS:", pesquisa["nome"])
-            continue
-
-        # 🔵 CONVERSÃO SEGURA
-        projeto_odk = int(str(pesquisa["projeto_odk"]).replace(".0", "").strip())
-        form_id = str(pesquisa["form_id"]).strip()
-
-        # 🟢 AGORA MONTA A URL
+        # =========================
+        # MONTAR URL ODK
+        # =========================
         url = (
             f"{ODK_URL}/v1/projects/{projeto_odk}"
             f"/forms/{form_id}.svc/Submissions"
@@ -154,11 +166,8 @@ for _, pesquisa in pesquisas.iterrows():
 
         data = buscar_todas_submissoes(url)
 
-        
-
-        data = buscar_todas_submissoes(url)
-
         print("TOTAL ODK:", len(data))
+        
 
         if len(data) == 0:
             continue
