@@ -1657,73 +1657,76 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
 
     if gps_df.empty:
 
-        fig_mapa = tema_fig(
-            px.scatter(title="Sem GPS disponível nesta pesquisa")
+    fig_mapa = tema_fig(
+        px.scatter(title="Sem GPS disponível nesta pesquisa")
+    )
+
+else:
+
+    if tipo_mapa == "calor":
+
+        fig_mapa = px.density_map(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            radius=35,
+            zoom=12,
+            height=650,
+            title="Mapa de Calor das Entrevistas",
+            map_style="open-street-map"
+        )
+
+    elif pergunta_mapa and "resposta_mapa" in gps_df.columns:
+
+        gps_df["resposta_mapa"] = gps_df["resposta_mapa"].fillna("Não informado")
+
+        fig_mapa = px.scatter_map(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            color="resposta_mapa",
+
+            color_discrete_map={
+                resposta: cor_resposta_mapa(resposta)
+                for resposta in gps_df["resposta_mapa"].unique()
+            },
+
+            hover_name="localidade",
+            hover_data=[
+                "entrevistador",
+                "accuracy",
+                "resposta_mapa"
+            ],
+            zoom=12,
+            height=650,
+            title="Mapa por Resposta da Pergunta",
+            map_style="open-street-map"
         )
 
     else:
 
-        if tipo_mapa == "calor":
-
-            fig_mapa = px.density_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                radius=35,
-                zoom=12,
-                height=650,
-                title="Mapa de Calor das Entrevistas"
-            )
-
-        elif pergunta_mapa and "resposta_mapa" in gps_df.columns:
-
-            gps_df["resposta_mapa"] = gps_df["resposta_mapa"].fillna("Não informado")
-
-            fig_mapa = px.scatter_mapbox(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                color="resposta_mapa",
-
-                color_discrete_map={
-                    resposta: cor_resposta_mapa(resposta)
-                    for resposta in gps_df["resposta_mapa"].unique()
-                },
-
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy",
-                    "resposta_mapa"
-                ],
-                zoom=12,
-                height=650,
-                title="Mapa por Resposta da Pergunta"
-            )
-        else:
-
-            fig_mapa = px.scatter_map(
-                gps_df,
-                lat="lat",
-                lon="lon",
-                hover_name="localidade",
-                hover_data=[
-                    "entrevistador",
-                    "accuracy"
-                ],
-                zoom=12,
-                height=650,
-                size=[14] * len(gps_df),
-                title="Mapa de Pontos das Entrevistas"
-            )
-
-        fig_mapa.update_layout(
-            mapbox_style="open-street-map",
-            paper_bgcolor="#111827",
-            plot_bgcolor="#111827",
-            font_color="#e5e7eb",
-            margin=dict(l=0, r=0, t=50, b=0)
+        fig_mapa = px.scatter_map(
+            gps_df,
+            lat="lat",
+            lon="lon",
+            hover_name="localidade",
+            hover_data=[
+                "entrevistador",
+                "accuracy"
+            ],
+            zoom=12,
+            height=650,
+            size=[14] * len(gps_df),
+            title="Mapa de Pontos das Entrevistas",
+            map_style="open-street-map"
         )
+
+    fig_mapa.update_layout(
+        paper_bgcolor="#111827",
+        plot_bgcolor="#111827",
+        font_color="#e5e7eb",
+        margin=dict(l=0, r=0, t=50, b=0)
+    )
 
     # =========================
     # CARREGAR PERGUNTAS
