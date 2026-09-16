@@ -16,28 +16,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import io
-
-@server.route("/etl")
-def rodar_etl():
-
-    token = request.args.get("token")
-
-    if token != "123456":
-        return "Token inválido", 403
-
-    try:
-        print("="*80)
-        print("RODANDO ETL AUTOMÁTICO...")
-        
-        subprocess.run(["python", "etl.py"], check=True)
-
-        print("ETL FINALIZADO")
-
-        return "ETL executado com sucesso"
-
-    except Exception as e:
-        print("ERRO NO ETL:", str(e))
-        return f"Erro: {str(e)}", 500
     
 # =========================
 # CONFIG
@@ -58,6 +36,34 @@ app = dash.Dash(
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+# =========================
+# ETL AUTOMÁTICO
+# =========================
+@server.route("/etl")
+def rodar_etl():
+
+    token = request.args.get("token")
+
+    if token != "123456":
+        return "Token inválido", 403
+
+    try:
+        print("=" * 80)
+        print("RODANDO ETL AUTOMÁTICO...")
+
+        subprocess.run([sys.executable, "etl.py"], check=True)
+
+        print("ETL FINALIZADO")
+
+        return "ETL executado com sucesso"
+
+    except Exception as e:
+        print("ERRO NO ETL:", str(e))
+        return f"Erro: {str(e)}", 500
+
 
 # =========================
 # LOGIN
@@ -188,12 +194,14 @@ def get_cliente(cliente_id):
         row = conn.execute(query, {"cliente_id": cliente_id}).fetchone()
 
     if row:
-        logo = row[1] or "/dashboard/assets/logos/sem_logo.png"
-        return {"nome": row[0], "logo": logo}
+        return {
+            "nome": row[0],
+            "logo": row[1]  # Pode ser NULL
+        }
 
     return {
         "nome": "Cliente",
-        "logo": "/dashboard/assets/logos/sem_logo.png"
+        "logo": None
     }
 
 
@@ -1408,6 +1416,7 @@ def inicializar_dashboard(pathname):
     valor_inicial = options[0]["value"] if options else None
 
     logo = cliente.get("logo")
+
     header = html.Div([
         html.Img(
             src=logo,
