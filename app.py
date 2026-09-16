@@ -233,6 +233,11 @@ def lista_pesquisas(cliente_id):
 
 
 def carregar_dados(pesquisa_id):
+
+    print("### CARREGAR_DADOS ###")
+    print("PESQUISA_ID RECEBIDO:", pesquisa_id)
+    print("TIPO:", type(pesquisa_id))
+    
     df = pd.read_sql(
         text("""
             SELECT id, submission_id, pesquisa_id, sexo, idade, localidade, dados, entrevistador
@@ -243,7 +248,9 @@ def carregar_dados(pesquisa_id):
         engine,
         params={"pesquisa_id": pesquisa_id}
     )
-
+    
+    print("ENTREVISTAS ENCONTRADAS:", len(df))
+    
     if df.empty:
         return df
 
