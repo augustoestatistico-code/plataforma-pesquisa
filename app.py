@@ -1702,7 +1702,7 @@ def atualizar_dashboard(pesquisa_id, filtro_localidade, filtro_entrevistador, pe
             )
         else:
 
-            fig_mapa = px.scatter_mapbox(
+            fig_mapa = px.scatter_map(
                 gps_df,
                 lat="lat",
                 lon="lon",
