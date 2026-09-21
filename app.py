@@ -63,7 +63,7 @@ def login():
             
             session["user_id"] = user[0]
             session["cliente_id"] = user[1]
-            return redirect("/dashboard/")
+            return redirect("/dashboard/", code=303)
 
         return """
         <body style="background:#0f172a;color:white;font-family:Arial;text-align:center;margin-top:100px">
@@ -76,7 +76,7 @@ def login():
     <body style="margin:0;background:#0f172a;font-family:Arial;color:white">
         <div style="width:360px;margin:120px auto;background:#111827;padding:35px;border-radius:18px;box-shadow:0 0 25px #000">
             <h2 style="text-align:center">📊 Plataforma Pesquisa</h2>
-            <form method="post">
+            <form method="post" action="/">
                 <label>Email</label>
                 <input name="email" style="width:100%;padding:12px;margin:8px 0 18px;border-radius:8px;border:0">
                 <label>Senha</label>
@@ -2978,6 +2978,9 @@ def gerar_pdf(pesquisa_id):
 # =========================
 # ETL ENDPOINT
 # =========================
+
+ETL_LOCK = "/tmp/plataforma_etl.lock"
+
 @server.route("/etl", methods=["GET", "HEAD"])
 def etl():
 
@@ -2986,16 +2989,54 @@ def etl():
     if token != os.getenv("ETL_TOKEN", "123456"):
         return "Token inválido", 403
 
-    # Executa tanto para GET quanto para HEAD
-    subprocess.Popen(
-        [sys.executable, "etl.py"],
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    )
+    # Verifica se existe um ETL anterior em execução
+    if os.path.exists(ETL_LOCK):
+        try:
+            with open(ETL_LOCK, "r") as f:
+                pid = int(f.read().strip())
+
+            # Verifica se o processo realmente continua vivo
+            os.kill(pid, 0)
+
+            print(f"ETL já está em execução. PID: {pid}")
+
+            if request.method == "HEAD":
+                return "", 200
+
+            return f"ETL já está em execução. PID: {pid}", 200
+
+        except (ProcessLookupError, ValueError, OSError):
+            # Lock antigo: o processo não existe mais
+            try:
+                os.remove(ETL_LOCK)
+            except OSError:
+                pass
+
+    try:
+        processo = subprocess.Popen(
+            [sys.executable, "etl.py"],
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+
+        # Guarda o PID do ETL
+        with open(ETL_LOCK, "w") as f:
+            f.write(str(processo.pid))
+
+        print(f"ETL iniciado. PID: {processo.pid}")
+
+    except Exception as e:
+        print(f"Erro ao iniciar ETL: {e}")
+
+        if request.method == "HEAD":
+            return "", 500
+
+        return f"Erro ao iniciar ETL: {e}", 500
 
     if request.method == "HEAD":
         return "", 200
 
-    return "ETL iniciado em segundo plano", 200
+    return f"ETL iniciado em segundo plano. PID: {processo.pid}", 200
+
 
 # =========================
 # RUN
