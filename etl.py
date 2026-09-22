@@ -206,10 +206,48 @@ for _, pesquisa in pesquisas.iterrows():
         if len(data) == 0:
             continue
 
-        df=pd.DataFrame(data)
+        df = pd.DataFrame(data)
+
+        # ==========================================
+        # FILTRAR SOMENTE ENTREVISTAS NOVAS
+        # ==========================================
+
+        if "__id" not in df.columns:
+            print("ERRO: campo __id não encontrado nas submissões ODK")
+            continue
+
+        total_odk = len(df)
+
+        with engine.connect() as conn:
+            existentes = conn.execute(
+                text("""
+                    SELECT submission_id
+                    FROM entrevistas
+                    WHERE pesquisa_id = :pesquisa_id
+                """),
+                {
+                    "pesquisa_id": int(pesquisa["id"])
+                }
+            ).scalars().all()
+
+        ids_existentes = set(existentes)
+
+        df = df[
+            ~df["__id"].isin(ids_existentes)
+        ].copy()
+
+        print("JÁ EXISTENTES:", total_odk - len(df))
+        print("NOVAS:", len(df))
+
+        if df.empty:
+            print(
+                "SEM NOVAS ENTREVISTAS:",
+                pesquisa["nome"]
+            )
+            continue
 
         with engine.begin() as conn:
-
+    
             for _,row in df.iterrows():
 
                 dados=(
