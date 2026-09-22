@@ -16,7 +16,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import io
-    
+import time
+
 # =========================
 # CONFIG
 # =========================
@@ -2980,6 +2981,8 @@ def gerar_pdf(pesquisa_id):
 # =========================
 
 ETL_LOCK = "/tmp/plataforma_etl.lock"
+ETL_MAX_SECONDS = 30 * 60  # 30 minutos
+
 
 @server.route("/etl", methods=["GET", "HEAD"])
 def etl():
@@ -2989,42 +2992,99 @@ def etl():
     if token != os.getenv("ETL_TOKEN", "123456"):
         return "Token inválido", 403
 
-    # Verifica se existe um ETL anterior em execução
+    agora = time.time()
+
+    # ==========================================
+    # VERIFICAR SE JÁ EXISTE UM ETL EM EXECUÇÃO
+    # ==========================================
     if os.path.exists(ETL_LOCK):
+
         try:
             with open(ETL_LOCK, "r") as f:
-                pid = int(f.read().strip())
+                lock_data = json.load(f)
 
-            # Verifica se o processo realmente continua vivo
-            os.kill(pid, 0)
+            pid = int(lock_data["pid"])
+            iniciado_em = float(lock_data["started_at"])
 
-            print(f"ETL já está em execução. PID: {pid}")
+            idade = agora - iniciado_em
 
-            if request.method == "HEAD":
-                return "", 200
+            processo_vivo = True
 
-            return f"ETL já está em execução. PID: {pid}", 200
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, OSError):
+                processo_vivo = False
 
-        except (ProcessLookupError, ValueError, OSError):
-            # Lock antigo: o processo não existe mais
+            # Processo existe e ainda está dentro do limite
+            if processo_vivo and idade < ETL_MAX_SECONDS:
+
+                minutos = int(idade / 60)
+
+                print(
+                    f"ETL já está em execução. "
+                    f"PID: {pid} | {minutos} min"
+                )
+
+                if request.method == "HEAD":
+                    return "", 200
+
+                return (
+                    f"ETL já está em execução. "
+                    f"PID: {pid} | {minutos} min",
+                    200
+                )
+
+            # Processo passou do limite
+            if processo_vivo and idade >= ETL_MAX_SECONDS:
+
+                print(
+                    f"ETL antigo detectado. "
+                    f"PID: {pid} | "
+                    f"{int(idade / 60)} min. Encerrando."
+                )
+
+                try:
+                    os.kill(pid, 15)
+                except (ProcessLookupError, OSError):
+                    pass
+
+            # Remove lock morto, inválido ou antigo
             try:
                 os.remove(ETL_LOCK)
             except OSError:
                 pass
 
+        except Exception as e:
+
+            print(f"Lock ETL inválido: {e}")
+
+            try:
+                os.remove(ETL_LOCK)
+            except OSError:
+                pass
+
+    # ==========================
+    # INICIAR NOVO PROCESSO ETL
+    # ==========================
     try:
+
         processo = subprocess.Popen(
             [sys.executable, "etl.py"],
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
 
-        # Guarda o PID do ETL
+        lock_data = {
+            "pid": processo.pid,
+            "started_at": time.time()
+        }
+
         with open(ETL_LOCK, "w") as f:
-            f.write(str(processo.pid))
+            json.dump(lock_data, f)
 
         print(f"ETL iniciado. PID: {processo.pid}")
 
     except Exception as e:
+
         print(f"Erro ao iniciar ETL: {e}")
 
         if request.method == "HEAD":
@@ -3035,7 +3095,10 @@ def etl():
     if request.method == "HEAD":
         return "", 200
 
-    return f"ETL iniciado em segundo plano. PID: {processo.pid}", 200
+    return (
+        f"ETL iniciado em segundo plano. PID: {processo.pid}",
+        200
+    )
 
 
 # =========================

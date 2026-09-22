@@ -16,8 +16,6 @@ ODK_PASS = "@Mat050dois"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-print("DATABASE_URL =", repr(DATABASE_URL))
-
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL está vazia. Defina com: set DATABASE_URL=sua_url")
 
@@ -43,44 +41,78 @@ engine = create_engine(
 def buscar_todas_submissoes(url):
 
     todos = []
+    urls_visitadas = set()
+    pagina_num = 0
+    MAX_PAGINAS = 500
 
     while url:
 
-        print("BUSCANDO:", url)
+        # Evita loop infinito se o ODK repetir o mesmo nextLink
+        if url in urls_visitadas:
+            print("ERRO: ODK repetiu uma URL. Interrompendo paginação.")
+            print("URL repetida:", url)
+            break
 
-        r = requests.get(
-            url,
-            auth=HTTPBasicAuth(ODK_USER, ODK_PASS),
-            timeout=(30, 180)
-        )
+        urls_visitadas.add(url)
 
-        if r.status_code != 200:
+        pagina_num += 1
 
+        if pagina_num > MAX_PAGINAS:
             print(
-                "ERRO API:",
-                r.status_code
+                f"ERRO: limite de {MAX_PAGINAS} páginas atingido. "
+                "Interrompendo paginação."
+            )
+            break
+
+        print(f"BUSCANDO PAGINA {pagina_num}: {url}")
+
+        try:
+
+            r = requests.get(
+                url,
+                auth=HTTPBasicAuth(ODK_USER, ODK_PASS),
+                timeout=(15, 60)
             )
 
+            r.raise_for_status()
+
+        except requests.exceptions.Timeout:
             print(
-                r.text[:500]
+                f"ERRO: timeout no ODK na página {pagina_num}"
             )
+            raise
 
-            return []
+        except requests.exceptions.RequestException as e:
+            print(
+                f"ERRO DE CONEXAO ODK na página {pagina_num}: {e}"
+            )
+            raise
 
-        js = r.json()
+        try:
+            js = r.json()
 
-        pagina = js.get(
-            "value",
-            []
+        except ValueError:
+            print(
+                f"ERRO: resposta inválida do ODK na página {pagina_num}"
+            )
+            raise
+
+        pagina = js.get("value", [])
+
+        todos.extend(pagina)
+
+        print(
+            f"PAGINA {pagina_num}: "
+            f"{len(pagina)} registros | "
+            f"TOTAL ACUMULADO: {len(todos)}"
         )
 
-        todos.extend(
-            pagina
-        )
+        proxima_url = js.get("@odata.nextLink")
 
-        url = js.get(
-            "@odata.nextLink"
-        )
+        if not proxima_url:
+            break
+
+        url = proxima_url
 
     return todos
 
@@ -114,17 +146,6 @@ print("\nPESQUISAS ENCONTRADAS:")
 print(
     pesquisas[
         ["id", "nome"]
-    ]
-)
-if PESQUISA_ID:
-    pesquisas = pesquisas[
-        pesquisas["id"] == int(PESQUISA_ID)
-    ]
-    
-print("\nPESQUISAS ENCONTRADAS:")
-print(
-    pesquisas[
-        ["id","nome"]
     ]
 )
 
